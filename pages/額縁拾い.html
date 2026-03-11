@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>額縁拾い v4.0</title>
+<title>額縁拾い v5.0</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -188,7 +188,7 @@ input[type=number]{width:60px;padding:4px 6px;border:1px solid var(--border);bor
         </div>
         <div class="table-wrap" style="max-height:60vh">
           <table>
-            <thead><tr><th>品番</th><th>種別</th><th>部位</th><th class="num">長さ(mm)</th><th class="num">本数</th></tr></thead>
+            <thead><tr><th>品番</th><th>面</th><th>種別</th><th>部位</th><th class="num">長さ(mm)</th><th class="num">本数</th></tr></thead>
             <tbody id="frameBody"></tbody>
           </table>
         </div>
@@ -227,8 +227,52 @@ input[type=number]{width:60px;padding:4px 6px;border:1px solid var(--border);bor
 const TATEGU_MASTER = [{"p":"EURO-1","h":2090,"w":890,"t":["額縁","額縁受け","T-bar","霧除け"]},{"p":"EURO-10 1680x2090","h":2090,"w":1680,"t":["額縁","額縁受け","T-bar","霧除け"]},{"p":"EURO-10 790x1890","h":1890,"w":790,"t":["額縁","額縁受け","T-bar","霧除け"]},{"p":"EURO-10 790x2090","h":2090,"w":790,"t":["額縁","額縁受け","T-bar","霧除け"]},{"p":"EURO-10 890x2090","h":2090,"w":890,"t":["額縁","額縁受け","T-bar","霧除け"]},{"p":"EURO-2","h":2090,"w":890,"t":["額縁","額縁受け","T-bar","霧除け"]},{"p":"EURO-3P 690x1890","h":1890,"w":690,"t":["額縁","額縁受け","T-bar","霧除け"]},{"p":"EURO-3P 790x1990","h":1990,"w":790,"t":["額縁","額縁受け","T-bar","霧除け"]},{"p":"EURO-3P 790x2090","h":2090,"w":790,"t":["額縁","額縁受け","T-bar","霧除け"]},{"p":"EURO-6","h":2090,"w":890,"t":["額縁","額縁受け","T-bar","霧除け"]},{"p":"EURO-7","h":2090,"w":890,"t":["額縁","額縁受け","T-bar","霧除け"]},{"p":"EURO-8","h":2090,"w":890,"t":["額縁","額縁受け","T-bar","霧除け"]},{"p":"MTF-1718(FIX)","h":1816,"w":1695,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"MTPDL-2120","h":2019,"w":2250,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"NHW-1-17","h":1744,"w":716,"t":["額縁","T-bar","木口"]},{"p":"NV-1 790x1890","h":1890,"w":790,"t":["額縁","額縁受け","T-bar"]},{"p":"NV-1 790x2090","h":2090,"w":790,"t":["額縁","額縁受け","T-bar"]},{"p":"NVs-1 1142x2062","h":2062,"w":1142,"t":["額縁","T-bar","木口"]},{"p":"NVs-1 695x1874","h":1874,"w":695,"t":["額縁","T-bar","木口"]},{"p":"NVs-1 695x2074","h":2074,"w":695,"t":["額縁","T-bar","木口"]},{"p":"NVs-1 795x2074","h":2074,"w":795,"t":["額縁","T-bar","木口"]},{"p":"NW-1 761x2062","h":2062,"w":761,"t":["額縁","T-bar","木口"]},{"p":"NW-1 762x2062","h":2062,"w":762,"t":["額縁","T-bar","木口"]},{"p":"NW-2","h":2062,"w":1142,"t":["額縁","T-bar","木口"]},{"p":"NW-2-10","h":1036,"w":1142,"t":["額縁","T-bar","木口"]},{"p":"NW-3","h":2062,"w":1521,"t":["額縁","T-bar","木口"]},{"p":"NW-3-10","h":1036,"w":1521,"t":["額縁","T-bar","木口"]},{"p":"VMSD 1500x2000","h":2000,"w":1500,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD 1810x2019","h":2019,"w":1810,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD 2000x2000","h":2000,"w":2000,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD-","h":2019,"w":2040,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 1505x2019","h":2019,"w":1505,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 1810x1800","h":1800,"w":1810,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 1810x2019","h":2019,"w":1810,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 2039x2000","h":2000,"w":2039,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 2050x2019","h":2019,"w":2050,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 2145x2019","h":2019,"w":2145,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 2200x2019","h":2019,"w":2200,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 2285x2019","h":2019,"w":2285,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 2419x2019","h":2019,"w":2419,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD-OX 1810x1940","h":1940,"w":1810,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD-OX 1810x2000","h":2000,"w":1810,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMSD-OX 1810x2019","h":2019,"w":1810,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW","h":1041,"w":1422,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 1008x933","h":933,"w":1008,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 1065x1311","h":1311,"w":1065,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 1065x1652","h":1652,"w":1065,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 1065x2019","h":2019,"w":1065,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 1065x607","h":607,"w":1065,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 1065x948","h":948,"w":1065,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 1780x1540","h":1540,"w":1780,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 2419x1500","h":1500,"w":2419,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 637x2000","h":2000,"w":637,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 690x1785","h":1785,"w":690,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 727x1093","h":1093,"w":727,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 727x1940","h":1940,"w":727,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 787x2000","h":2000,"w":787,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 787x2019","h":2019,"w":787,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 810x1000","h":1000,"w":810,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 810x1323","h":1323,"w":810,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 824x1900","h":1900,"w":824,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 824x2019","h":2019,"w":824,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 845x1900","h":1900,"w":845,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 855x2019","h":2019,"w":855,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 855x685","h":685,"w":855,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 905x2019","h":2019,"w":905,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 937x2000","h":2000,"w":937,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 960x1299","h":1299,"w":960,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 960x1600","h":1600,"w":960,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 960x1900","h":1900,"w":960,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 960x999","h":999,"w":960,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-1 1008x1484","h":1484,"w":1008,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-1 450x597","h":597,"w":450,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-1(FIX) 450x597","h":597,"w":450,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-1(FIX) 780x650","h":650,"w":780,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-1(OBS) 450x597","h":597,"w":450,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-1(OBS) 533x889","h":889,"w":533,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-11","h":1194,"w":533,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-13","h":1194,"w":1600,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-13b","h":1194,"w":1955,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-2","h":533,"w":889,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-3","h":889,"w":533,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-3(FIX)","h":889,"w":533,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-3(OBS) 1067x889","h":889,"w":1067,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-3(OBS) 533x889","h":889,"w":533,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-3+VMW-4","h":889,"w":1600,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-4 1067x1041","h":1041,"w":1067,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-4 1067x889","h":889,"w":1067,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-4 810x1957","h":1957,"w":810,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-4+VMW-3","h":889,"w":1600,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-4a","h":889,"w":1422,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-5","h":1041,"w":533,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-6","h":1041,"w":1067,"t":["額縁2","額縁受け","T-bar","霧除け"]},{"p":"VMW-6a","h":1041,"w":1422,"t":["額縁2","額縁受け","T-bar","霧除け"]}];
 
 // ========== STATE ==========
-let selectedItems = []; // [{p, h, w, t, qty}]
-let frameResults = [];  // [{p, type, part, length, qty}]
+let selectedItems = []; // [{p, h, w, t, qty, wall}]  wall: "log"|"partition"
+let frameResults = [];  // [{p, type, part, length, qty, side}]
+
+// ========== 額縁ルール（IFCビューア準拠） ==========
+// front_frame: 表面の額縁辺数 ("3"=上左右, "4"=上下左右)
+// back_frame:  裏面の額縁辺数 ("3"=上左右, "4"=上下左右, null=なし)
+// front_extras: 表面のみの追加部材 (裏面にはつかない)
+const FRAME_RULES = {
+  "VMW":  {front_frame:"4", back_frame:"4", front_extras:["額縁受け","T-bar","霧除け"]},
+  "VMSD": {front_frame:"4", back_frame:"3", front_extras:["額縁受け","T-bar","霧除け"]},
+  "EURO": {front_frame:"4", back_frame:"3", front_extras:["額縁受け","T-bar","霧除け"]},
+  "NV":   {front_frame:"4", back_frame:"3", front_extras:["額縁受け","T-bar"]},
+  "NVs":  {front_frame:"3", back_frame:"3", front_extras:["木口"]},
+  "NW":   {front_frame:"4", back_frame:"3", front_extras:["T-bar","木口"]},
+  "JD":   {front_frame:"3", back_frame:"3", front_extras:["木口"]},
+  "MTF":  {front_frame:"4", back_frame:"4", front_extras:["額縁受け","T-bar","霧除け"]},
+  "MTPDL":{front_frame:"4", back_frame:"3", front_extras:["額縁受け","T-bar","霧除け"]},
+  "NHW":  {front_frame:"4", back_frame:"3", front_extras:["T-bar","木口"]},
+};
+// 間仕切り壁の場合 (NV/NWのみルール変更あり、他はログ壁と同じ)
+const PARTITION_RULES = {
+  "NV":  {front_frame:"3", back_frame:"3", front_extras:[]},
+  "NW":  {front_frame:"3", back_frame:"3", front_extras:["木口"]},
+};
+
+// 品番からタイプキーを判定
+function getTypeKey(pname) {
+  const u = pname.toUpperCase();
+  if(u.startsWith('MTPDL')) return 'MTPDL';
+  if(u.startsWith('MTF'))  return 'MTF';
+  if(u.startsWith('NHW'))  return 'NHW';
+  if(u.startsWith('VMSD')) return 'VMSD';
+  if(u.startsWith('VMW'))  return 'VMW';
+  if(u.startsWith('EURO')) return 'EURO';
+  if(u.startsWith('NVS'))  return 'NVs';
+  if(u.startsWith('NV'))   return 'NV';
+  if(u.startsWith('NW'))   return 'NW';
+  if(u.startsWith('JD') || u.startsWith('SD')) return 'JD';
+  return 'JD'; // デフォルト
+}
+
+function getRule(pname, wall) {
+  const key = getTypeKey(pname);
+  if(wall === 'partition' && PARTITION_RULES[key]) return PARTITION_RULES[key];
+  return FRAME_RULES[key] || FRAME_RULES['JD'];
+}
 
 // ========== PANEL SWITCHING ==========
 function showPanel(n) {
@@ -273,9 +317,9 @@ function addItem(idx) {
   const qtyEl = document.getElementById('qty_' + idx);
   const qty = parseInt(qtyEl.value) || 1;
   if(qty <= 0) return;
-  const existing = selectedItems.find(s => s.p === d.p);
+  const existing = selectedItems.find(s => s.p === d.p && s.wall === 'log');
   if(existing) { existing.qty += qty; }
-  else { selectedItems.push({p:d.p, h:d.h, w:d.w, t:[...d.t], qty}); }
+  else { selectedItems.push({p:d.p, h:d.h, w:d.w, t:[...d.t], qty, wall:'log'}); }
   qtyEl.value = 0;
   renderSelected();
 }
@@ -303,6 +347,12 @@ function toggleType(itemIdx, type) {
   renderSelected();
 }
 
+function toggleWall(idx) {
+  const s = selectedItems[idx];
+  s.wall = (s.wall === 'partition') ? 'log' : 'partition';
+  renderSelected();
+}
+
 function renderSelected() {
   const el = document.getElementById('selectedList');
   document.getElementById('selectedCount').textContent = `${selectedItems.length}件`;
@@ -319,85 +369,123 @@ function renderSelected() {
       const on = s.t.includes(t);
       return `<span class="tag-toggle ${on?'on':'off'}" onclick="toggleType(${i},'${t}')" title="クリックで切替">${t}</span>`;
     }).join('');
+    const isPartition = (s.wall === 'partition');
+    const pieceCnt = countPiecesForItem(s);
     return `<div class="selected-item">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
         <strong>${esc(s.p)}</strong>
         <span style="color:var(--muted);font-size:11px">${s.h}×${s.w}</span>
+        <label style="font-size:11px;display:flex;align-items:center;gap:3px;margin-left:8px;cursor:pointer;color:${isPartition?'var(--accent3)':'var(--muted)'}">
+          <input type="checkbox" ${isPartition?'checked':''} onchange="toggleWall(${i})"> 間仕切り壁
+        </label>
         <span style="margin-left:auto;display:flex;align-items:center;gap:4px">
           <input type="number" min="1" value="${s.qty}" style="width:45px" onchange="selectedItems[${i}].qty=parseInt(this.value)||1;renderSelected()">
           <button class="btn btn-sm" onclick="removeItem(${i})">×</button>
         </span>
       </div>
-      <div>${typeTags} <span style="color:var(--muted);font-size:11px;margin-left:4px">${countPiecesForTypes(s.t)}本/個 × ${s.qty} = ${countPiecesForTypes(s.t)*s.qty}本</span></div>
+      <div>${typeTags} <span style="color:var(--muted);font-size:11px;margin-left:4px">${pieceCnt}本/個 × ${s.qty} = ${pieceCnt*s.qty}本</span></div>
     </div>`;
   }).join('');
   // Show total preview
-  const totalPreview = selectedItems.reduce((sum,s) => sum + countPiecesForTypes(s.t)*s.qty, 0);
+  const totalPreview = selectedItems.reduce((sum,s) => sum + countPiecesForItem(s)*s.qty, 0);
   document.getElementById('selectedCount').textContent = `${selectedItems.length}件 (${totalPreview}本)`;
 }
 
-function countPiecesForTypes(types) {
+// 表裏ルール準拠の本数計算 (IFCビューアと同じロジック)
+function countPiecesForItem(item) {
+  const rule = getRule(item.p, item.wall || 'log');
   let n = 0;
-  for(const t of types) {
-    if(t==='額縁2') n+=4;
-    else if(t==='額縁') n+=3;
-    else if(t==='額縁受け') n+=1;
-    else if(t==='T-bar') n+=2;
-    else if(t==='霧除け') n+=1;
-    else if(t==='木口') n+=3;
+  // 表面: 額縁 + extras
+  for(const t of item.t) {
+    if(t==='額縁2') n += (rule.front_frame==='4' ? 4 : 3);
+    else if(t==='額縁') n += (rule.front_frame==='4' ? 4 : 3);
+    else if(t==='額縁受け') { if(rule.front_extras.includes('額縁受け')) n+=1; }
+    else if(t==='T-bar') { if(rule.front_extras.includes('T-bar')) n+=2; }
+    else if(t==='霧除け') { if(rule.front_extras.includes('霧除け')) n+=1; }
+    else if(t==='木口') { if(rule.front_extras.includes('木口')) n+=3; }
   }
-  return n * 2; // 表裏2倍
+  // 裏面: 額縁のみ (T-bar/額縁受け/霧除け/木口は表面のみ)
+  if(rule.back_frame) {
+    const has4 = item.t.includes('額縁2');
+    const has3 = item.t.includes('額縁');
+    if(has4 || has3) {
+      n += (rule.back_frame==='4' ? 4 : 3);
+    }
+  }
+  return n;
+}
+// 後方互換
+function countPiecesForTypes(types) {
+  return countPiecesForItem({p:'JD',t:types,wall:'log'});
 }
 
 // ========== PANEL 2: FRAME CALCULATION ==========
+// IFCビューア準拠: 表面=フルセット(額縁+extras)、裏面=額縁のみ
 function calcFrames() {
   frameResults = [];
   for(const item of selectedItems) {
-    const {p, h, w, t, qty} = item;
+    const {p, h, w, t, qty, wall} = item;
+    const rule = getRule(p, wall || 'log');
     for(let q = 0; q < qty; q++) {
-      for(const type of t) {
-        generateFramePieces(p, h, w, type);
-      }
+      generateFramePiecesV2(p, h, w, t, rule);
     }
-  }
-  // 表裏2倍: 額縁は建具の表と裏に使うため、全ピースを2倍にする
-  for(const f of frameResults) {
-    f.qty *= 2;
   }
   renderFrameResults();
   showPanel(1);
 }
 
-function generateFramePieces(p, h, w, type) {
-  switch(type) {
-    case '額縁2':
-      // 額縁2 → 4 pieces as 額縁: bottom(w), top(w+300), side(h+170)×2
-      frameResults.push({p, type:'額縁', part:'下(底)', length:w, qty:1});
-      frameResults.push({p, type:'額縁', part:'上(天)', length:w+300, qty:1});
-      frameResults.push({p, type:'額縁', part:'左(縦)', length:h+170, qty:1});
-      frameResults.push({p, type:'額縁', part:'右(縦)', length:h+170, qty:1});
-      break;
-    case '額縁':
-      // 額縁 → 3 pieces: top(w+300), side(h+170)×2
-      frameResults.push({p, type:'額縁', part:'上(天)', length:w+300, qty:1});
-      frameResults.push({p, type:'額縁', part:'左(縦)', length:h+170, qty:1});
-      frameResults.push({p, type:'額縁', part:'右(縦)', length:h+170, qty:1});
-      break;
-    case '額縁受け':
-      frameResults.push({p, type:'額縁受け', part:'横', length:w, qty:1});
-      break;
-    case 'T-bar':
-      frameResults.push({p, type:'T-bar', part:'縦1', length:h, qty:1});
-      frameResults.push({p, type:'T-bar', part:'縦2', length:h, qty:1});
-      break;
-    case '霧除け':
-      frameResults.push({p, type:'霧除け', part:'横', length:w+300, qty:1});
-      break;
-    case '木口':
-      frameResults.push({p, type:'木口', part:'上(横)', length:w, qty:1});
-      frameResults.push({p, type:'木口', part:'左(縦)', length:h, qty:1});
-      frameResults.push({p, type:'木口', part:'右(縦)', length:h, qty:1});
-      break;
+function generateFramePiecesV2(p, h, w, types, rule) {
+  const has4frame = types.includes('額縁2');
+  const has3frame = types.includes('額縁');
+  const hasFrame = has4frame || has3frame;
+
+  // --- 表面(front): 額縁 + extras ---
+  if(hasFrame) {
+    if(rule.front_frame === '4') {
+      frameResults.push({p, type:'額縁', part:'表・上(天)', length:w+300, qty:1, side:'front'});
+      frameResults.push({p, type:'額縁', part:'表・下(底)', length:w, qty:1, side:'front'});
+      frameResults.push({p, type:'額縁', part:'表・左(縦)', length:h+170, qty:1, side:'front'});
+      frameResults.push({p, type:'額縁', part:'表・右(縦)', length:h+170, qty:1, side:'front'});
+    } else {
+      frameResults.push({p, type:'額縁', part:'表・上(天)', length:w+300, qty:1, side:'front'});
+      frameResults.push({p, type:'額縁', part:'表・左(縦)', length:h+170, qty:1, side:'front'});
+      frameResults.push({p, type:'額縁', part:'表・右(縦)', length:h+170, qty:1, side:'front'});
+    }
+  }
+  // 表面の追加部材 (extras) — 裏面にはつかない
+  for(const extra of rule.front_extras) {
+    if(!types.includes(extra)) continue;
+    switch(extra) {
+      case '額縁受け':
+        frameResults.push({p, type:'額縁受け', part:'表・横', length:w, qty:1, side:'front'});
+        break;
+      case 'T-bar':
+        frameResults.push({p, type:'T-bar', part:'表・縦1', length:h, qty:1, side:'front'});
+        frameResults.push({p, type:'T-bar', part:'表・縦2', length:h, qty:1, side:'front'});
+        break;
+      case '霧除け':
+        frameResults.push({p, type:'霧除け', part:'表・横', length:w+300, qty:1, side:'front'});
+        break;
+      case '木口':
+        frameResults.push({p, type:'木口', part:'表・上(横)', length:w, qty:1, side:'front'});
+        frameResults.push({p, type:'木口', part:'表・左(縦)', length:h, qty:1, side:'front'});
+        frameResults.push({p, type:'木口', part:'表・右(縦)', length:h, qty:1, side:'front'});
+        break;
+    }
+  }
+
+  // --- 裏面(back): 額縁のみ (T-bar/額縁受け/霧除け/木口なし) ---
+  if(hasFrame && rule.back_frame) {
+    if(rule.back_frame === '4') {
+      frameResults.push({p, type:'額縁', part:'裏・上(天)', length:w+300, qty:1, side:'back'});
+      frameResults.push({p, type:'額縁', part:'裏・下(底)', length:w, qty:1, side:'back'});
+      frameResults.push({p, type:'額縁', part:'裏・左(縦)', length:h+170, qty:1, side:'back'});
+      frameResults.push({p, type:'額縁', part:'裏・右(縦)', length:h+170, qty:1, side:'back'});
+    } else {
+      frameResults.push({p, type:'額縁', part:'裏・上(天)', length:w+300, qty:1, side:'back'});
+      frameResults.push({p, type:'額縁', part:'裏・左(縦)', length:h+170, qty:1, side:'back'});
+      frameResults.push({p, type:'額縁', part:'裏・右(縦)', length:h+170, qty:1, side:'back'});
+    }
   }
 }
 
@@ -424,8 +512,11 @@ function renderFrameResults() {
   const body = document.getElementById('frameBody');
   body.innerHTML = frameResults.map(f => {
     const c = TYPE_COLORS[f.type] || '#999';
+    const sideLabel = f.side === 'front' ? '表' : '裏';
+    const sideColor = f.side === 'front' ? 'var(--accent2)' : 'var(--accent)';
     return `<tr>
       <td><strong>${esc(f.p)}</strong></td>
+      <td><span style="font-size:11px;font-weight:600;color:${sideColor}">${sideLabel}</span></td>
       <td><span class="type-dot" style="background:${c}"></span>${f.type}</td>
       <td style="color:var(--muted)">${f.part}</td>
       <td class="num"><strong>${f.length.toLocaleString()}</strong></td>
@@ -847,7 +938,8 @@ function importPdfItems() {
         h: mr.master.h,
         w: mr.master.w,
         t: [...mr.master.t],
-        qty: item.qty
+        qty: item.qty,
+        wall: 'log'
       };
     } else {
       // Unmatched (EURO, JD/JW, custom) - create with CAD dimensions + default types
@@ -859,12 +951,13 @@ function importPdfItems() {
         h: item.h,
         w: item.w,
         t: mr.types || getDefaultTypes(item.marker),
-        qty: item.qty
+        qty: item.qty,
+        wall: 'log'
       };
     }
 
-    // Merge with existing if same product
-    const existing = selectedItems.find(s => s.p === entry.p && s.h === entry.h && s.w === entry.w);
+    // Merge with existing if same product and same wall type
+    const existing = selectedItems.find(s => s.p === entry.p && s.h === entry.h && s.w === entry.w && s.wall === entry.wall);
     if(existing) {
       existing.qty += entry.qty;
     } else {
