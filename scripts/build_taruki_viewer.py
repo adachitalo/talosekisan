@@ -146,30 +146,35 @@ def detect_roof_params(ifc, settings):
         ridge_range_min = float(tv[:, 2].min())
         ridge_range_max = float(tv[:, 2].max())
 
-    # 法線から勾配比を算出（面積加重平均）
-    # slope_axis方向の法線成分で前面/背面を振り分け
-    fn_list = []  # 前面（slope_axis負方向）
-    bn_list = []  # 背面（slope_axis正方向）
-    for normal, area in front_normals:
-        if normal[slope_idx] < -0.1:
-            fn_list.append((normal, area))
-        elif normal[slope_idx] > 0.1:
-            bn_list.append((normal, area))
+    # 頂点ベースで勾配比を算出（面法線は鼻隠し/破風の面に引きずられるため）
+    # 各頂点の slope = (ridge_height - Y) / |ridge_pos - slope_coord| を計算し
+    # 最頻値（mode）を採用することで鼻隠し/破風の外れ値を除外
+    vertex_slopes = []
+    min_dist = 0.3  # 棟から近すぎる頂点は除外（計算誤差が大きい）
+    for v in tv:
+        sc = v[slope_idx]
+        dist = abs(sc - ridge_pos)
+        if dist < min_dist:
+            continue
+        rise = ridge_height - v[1]
+        if rise < 0:
+            continue
+        s = rise / dist
+        if 0.1 < s < 3.0:  # 妥当な範囲のみ
+            vertex_slopes.append(round(s * 20) / 20)  # 0.05単位に丸め
 
     slope_ratio = 0.6  # デフォルト（6寸勾配）
-    if fn_list:
-        fn_avg = np.average([n for n, a in fn_list], weights=[a for n, a in fn_list], axis=0)
-        fn_avg = fn_avg / np.linalg.norm(fn_avg)
-        slope_ratio = abs(fn_avg[slope_idx]) / fn_avg[1]
+    if vertex_slopes:
+        # 最頻値を採用（鼻隠し/破風の頂点は異なる値になるので自然に除外される）
+        from collections import Counter
+        slope_counts = Counter(vertex_slopes)
+        mode_slope = slope_counts.most_common(1)[0][0]
+        slope_ratio = mode_slope
         slope_angle = np.degrees(np.arctan(slope_ratio))
-        print(f"\n  Front face slope: ratio={slope_ratio:.4f} angle={slope_angle:.1f}deg")
-    if bn_list:
-        bn_avg = np.average([n for n, a in bn_list], weights=[a for n, a in bn_list], axis=0)
-        bn_avg = bn_avg / np.linalg.norm(bn_avg)
-        back_slope = abs(bn_avg[slope_idx]) / bn_avg[1]
-        print(f"  Back face slope:  ratio={back_slope:.4f} angle={np.degrees(np.arctan(back_slope)):.1f}deg")
-        # 前後の平均を使用（通常は同じ勾配）
-        slope_ratio = (slope_ratio + back_slope) / 2
+        print(f"\n  Vertex-based slope computation:")
+        print(f"    Total slope samples: {len(vertex_slopes)}")
+        print(f"    Top 5 slopes: {slope_counts.most_common(5)}")
+        print(f"    Mode slope: {mode_slope:.2f} (angle={slope_angle:.1f}deg)")
 
     # 軒先Y座標: 勾配比から算出（鼻隠し下端ではなく屋根面の実際の高さ）
     eave_height_min = ridge_height - abs(ridge_pos - eave_pos_min) * slope_ratio
