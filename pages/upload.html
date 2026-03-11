@@ -368,7 +368,7 @@ async function uploadFile(file) {
 
     // Wait a moment for Actions to trigger
     await sleep(3000);
-    updateStatus('🔨 IFC処理中（約30秒）...', 70);
+    updateStatus('🔨 IFC処理中（全モデル再生成のため数分〜15分かかります）...', 70);
 
     // Poll for workflow completion
     const success = await waitForWorkflow(fileName);
@@ -400,7 +400,7 @@ async function readFileAsBase64(file) {
   });
 }
 
-async function waitForWorkflow(fileName, maxWait = 600000) {
+async function waitForWorkflow(fileName, maxWait = 1200000) {
   const token = getToken();
   const startTime = Date.now();
 
