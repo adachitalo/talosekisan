@@ -277,19 +277,41 @@ def extract_meshes(ifc_file):
 # ============================================================================
 # IFC解析 – 建具検出と額縁ライン生成
 # ============================================================================
-def get_element_placement_matrix(element):
-    """IfcLocalPlacement から4x4変換行列を取得"""
-    try:
-        settings = ifcopenshell.geom.settings()
-        settings.set(settings.USE_WORLD_COORDS, True)
-        shape = ifcopenshell.geom.create_shape(settings, element)
-        mat = list(shape.geometry.matrix)
-        m = np.array(mat).reshape(4, 3).T
-        result = np.eye(4)
-        result[:3, :4] = m
-        return result
-    except Exception:
-        return np.eye(4)
+def get_element_placement_and_center(element):
+    """建具のワールド座標中心と方向ベクトルを取得。
+    Returns: (center, width_dir, height_dir, depth_dir) すべてIFC座標系
+    """
+    settings_world = ifcopenshell.geom.settings()
+    settings_world.set(settings_world.USE_WORLD_COORDS, True)
+    settings_local = ifcopenshell.geom.settings()
+    settings_local.set(settings_local.USE_WORLD_COORDS, False)
+
+    # ワールド座標メッシュからバウンディングボックス中心を取得
+    shape_w = ifcopenshell.geom.create_shape(settings_world, element)
+    vf = shape_w.geometry.verts
+    xs = [vf[i] for i in range(0, len(vf), 3)]
+    ys = [vf[i + 1] for i in range(0, len(vf), 3)]
+    zs = [vf[i + 2] for i in range(0, len(vf), 3)]
+    center = np.array([
+        (min(xs) + max(xs)) / 2,
+        (min(ys) + max(ys)) / 2,
+        (min(zs) + max(zs)) / 2
+    ])
+
+    # ローカル座標の変換行列から方向ベクトルを取得
+    shape_l = ifcopenshell.geom.create_shape(settings_local, element)
+    mat = list(shape_l.transformation.matrix)
+    m44 = np.array(mat).reshape(4, 4).T
+    # IFC建具配置: x_dir=幅方向, y_dir=奥行き方向, z_dir=高さ方向
+    width_dir = m44[:3, 0]
+    depth_dir = m44[:3, 1]
+    height_dir = m44[:3, 2]
+
+    width_dir = width_dir / (np.linalg.norm(width_dir) + 1e-12)
+    height_dir = height_dir / (np.linalg.norm(height_dir) + 1e-12)
+    depth_dir = depth_dir / (np.linalg.norm(depth_dir) + 1e-12)
+
+    return center, width_dir, height_dir, depth_dir
 
 
 def get_typedef_name(ifc_file, element):
@@ -324,15 +346,11 @@ def detect_fixtures_and_frames(ifc_file):
             wall_type = wall_info.get(element.id(), "log")
             frame_w, frame_h = get_frame_dimensions(ftype, ifc_w, ifc_h, wall_type)
 
-            matrix = get_element_placement_matrix(element)
-            origin = matrix[:3, 3]
-            x_dir = matrix[:3, 0]
-            y_dir = matrix[:3, 1]
-            z_dir = matrix[:3, 2]
-
-            x_dir = x_dir / (np.linalg.norm(x_dir) + 1e-12)
-            y_dir = y_dir / (np.linalg.norm(y_dir) + 1e-12)
-            z_dir = z_dir / (np.linalg.norm(z_dir) + 1e-12)
+            try:
+                center, width_dir, height_dir, depth_dir = \
+                    get_element_placement_and_center(element)
+            except Exception:
+                continue
 
             w_m = ifc_w / 1000.0
             h_m = ifc_h / 1000.0
@@ -348,15 +366,17 @@ def detect_fixtures_and_frames(ifc_file):
 
             pieces = generate_frame_pieces(ftype, frame_w, frame_h, wall_type)
 
-            front_offset = z_dir * 0.015
-            back_offset = -z_dir * 0.015
+            # depth_dir = 壁面の法線方向（表/裏オフセット）
+            front_offset = depth_dir * 0.015
+            back_offset = -depth_dir * 0.015
 
             for kind, piece_name, length_mm, side in pieces:
                 offset = front_offset if side == "front" else back_offset
 
+                # center=メッシュ中心, width_dir=幅方向, height_dir=高さ方向
                 p1, p2 = compute_frame_line_3d(
                     kind, piece_name,
-                    origin, x_dir, y_dir,
+                    center, width_dir, height_dir,
                     w_m, h_m, offset
                 )
 
