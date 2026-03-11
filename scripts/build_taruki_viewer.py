@@ -386,19 +386,16 @@ def place_rafters(rp, wall_edges, openings):
         rafter_positions[key] = {"reason": "基本ピッチ", "double": False}
         pos += RAFTER_PITCH
 
-    # 2. ログ壁エッジに配置
+    # 2. ログ壁エッジに配置（垂木と平行な壁＝勾配方向に走る壁のみ）
     wall_ridge_edges = set()
     for we in wall_edges:
         if we["type"] == "gable":
-            # 妻壁: 壁の中心位置の両脇
+            # 妻壁（勾配方向に走る壁）: 壁の中心位置の両脇
             rc = we["ridge_coord"]
             half_w = we.get("width", 0.12) / 2
             wall_ridge_edges.add(round(rc - half_w, 4))
             wall_ridge_edges.add(round(rc + half_w, 4))
-        elif we["type"] == "eave":
-            # eave壁: 端部
-            wall_ridge_edges.add(round(we["ridge_min"], 4))
-            wall_ridge_edges.add(round(we["ridge_max"], 4))
+        # eave壁（棟軸方向に走る壁）は垂木と直交するため、脇配置不要
 
     for edge in wall_ridge_edges:
         if ridge_min - 0.01 <= edge <= ridge_max + 0.01:
@@ -480,7 +477,7 @@ def generate_rafter_lines(rafters, rp):
                 "side": side_label,
             })
 
-            # ダブル配置: 45mmオフセットした追加垂木
+            # ダブル配置: 45mmオフセットした追加垂木（同じ理由名で集計統合）
             if double:
                 offset = RAFTER_PITCH * 0.1  # 約45mm
                 if ridge_axis == "x":
@@ -498,7 +495,7 @@ def generate_rafter_lines(rafters, rp):
                 lines.append({
                     "seg": seg2,
                     "length_m": round(length, 4),
-                    "reason": reason + "(ダブル)",
+                    "reason": reason,
                     "double": True,
                     "side": side_label,
                 })
@@ -737,9 +734,7 @@ const REASON_COLORS = {{
   "基本ピッチ": 0xffa500,
   "ログ壁脇": 0x00ff88,
   "天窓脇": 0xff4444,
-  "天窓脇(ダブル)": 0xff6666,
   "煙突脇": 0xff00ff,
-  "煙突脇(ダブル)": 0xff66ff,
 }};
 
 const W=innerWidth, H=innerHeight;
