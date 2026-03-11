@@ -116,9 +116,19 @@ def get_host_wall_info(ifc_file):
 # ArchiCAD TypeDef名 → 額縁タイプキー のマッピング
 # ============================================================================
 def classify_fixture_type(name: str, typedef: str) -> str:
-    """ArchiCADのName/TypeDef名から額縁タイプキーを決定"""
+    """ArchiCADのName/TypeDef名から額縁タイプキーを決定。
+    額縁不要の建具はNoneを返す。
+    """
     td = typedef.upper()
     nm = name.upper()
+
+    # --- 額縁不要の建具を除外 ---
+    # LogsOpeningDoor: ログ壁大開口（建具なし）
+    if "LOGSOPENINGDOOR" in td or "LOGS_OPENING" in td:
+        return None
+    # open_ad: 開放部（建具リーフなし）
+    if td == "OPEN_AD" or (nm.startswith("OPEN") and "DOOR" not in td):
+        return None
 
     if "VMSD" in td or "PSD" in td:
         return "VMSD"
@@ -236,7 +246,9 @@ def generate_frame_pieces(ftype: str, w_mm: float, h_mm: float, wall_type: str =
 # IFC解析 – 建物メッシュ抽出
 # ============================================================================
 def extract_meshes(ifc_file):
-    """IFCから建物要素のメッシュを抽出"""
+    """IFCから建物要素のメッシュを抽出。
+    天窓(IfcWindow on IfcRoof)は"天窓"カテゴリに分類。
+    """
     settings = ifcopenshell.geom.settings()
     settings.set(settings.USE_WORLD_COORDS, True)
 
@@ -250,6 +262,22 @@ def extract_meshes(ifc_file):
         "IfcMember": "部材",
     }
 
+    # 天窓検出: IfcRoof に含まれる IfcWindow を特定
+    skylight_ids = set()
+    for rel in ifc_file.by_type("IfcRelVoidsElement"):
+        host = rel.RelatingBuildingElement
+        if host.is_a("IfcRoof"):
+            opening = rel.RelatedOpeningElement
+            for fill_rel in ifc_file.by_type("IfcRelFillsElement"):
+                if fill_rel.RelatingOpeningElement.id() == opening.id():
+                    skylight_ids.add(fill_rel.RelatedBuildingElement.id())
+    # TypeDef名でも天窓を検出（スカイライト/skylight）
+    for win in ifc_file.by_type("IfcWindow"):
+        td = get_typedef_name(ifc_file, win).lower()
+        nm = (win.Name or "").lower()
+        if "スカイライト" in td or "skylight" in td or "スカイライト" in nm or "skylight" in nm or nm.startswith("sl"):
+            skylight_ids.add(win.id())
+
     for element in ifc_file.by_type("IfcBuildingElement"):
         try:
             shape = ifcopenshell.geom.create_shape(settings, element)
@@ -261,6 +289,9 @@ def extract_meshes(ifc_file):
             cat = type_map.get(ifc_type, "")
             if not cat:
                 continue
+            # 天窓は専用カテゴリ
+            if element.id() in skylight_ids:
+                cat = "天窓"
             # IFC(Z-up) → Three.js(Y-up) 座標変換: (x,y,z)→(x,z,-y)
             verts_3js = []
             for vi in range(0, len(verts), 3):
@@ -341,6 +372,8 @@ def detect_fixtures_and_frames(ifc_file):
                 continue
 
             ftype = classify_fixture_type(name, typedef)
+            if ftype is None:
+                continue  # 額縁不要の建具（LogsOpeningDoor, open_ad等）
             label = make_fixture_label(name, typedef, ftype, ifc_w)
 
             wall_type = wall_info.get(element.id(), "log")
@@ -508,8 +541,16 @@ const FRAME_CSS={{"額縁":"#ff4444","額縁受け":"#44ff44","T-bar":"#4488ff",
 
 const MESH_COLORS={{
   "壁":0xcc7733,"ドア":0x5588cc,"窓":0x5588cc,"梁":0xddaa22,
-  "柱":0xcc8844,"1F床":0xddbb77,"手摺":0x888888,"屋根":0xcc3333,"部材":0x999999
+  "柱":0xcc8844,"1F床":0xddbb77,"手摺":0x888888,"屋根":0xcc3333,
+  "天窓":0x66aaff,"部材":0x999999,"階段":0xbbaa88
 }};
+const MESH_CSS={{
+  "壁":"#cc7733","ドア":"#5588cc","窓":"#5588cc","梁":"#ddaa22",
+  "柱":"#cc8844","1F床":"#ddbb77","手摺":"#888888","屋根":"#cc3333",
+  "天窓":"#66aaff","部材":"#999999","階段":"#bbaa88"
+}};
+// 屋根はデフォルト非表示
+const HIDDEN_CATS={{"屋根":true}};
 
 const W=window.innerWidth,H=window.innerHeight;
 const renderer=new THREE.WebGLRenderer({{canvas:document.getElementById('cv'),antialias:true}});
@@ -521,6 +562,8 @@ controls.enableDamping=true;controls.dampingFactor=0.08;
 scene.add(new THREE.AmbientLight(0xffffff,0.5));
 const dl=new THREE.DirectionalLight(0xffffff,0.7);dl.position.set(10,20,-10);scene.add(dl);
 
+const buildingGroup=new THREE.Group();
+const catGroups={{}};
 const bbox=new THREE.Box3();
 MESHES.forEach(m=>{{
   const g=new THREE.BufferGeometry();
@@ -528,9 +571,14 @@ MESHES.forEach(m=>{{
   g.setIndex(m.faces);g.computeVertexNormals();
   const color=MESH_COLORS[m.cat]||0x888888;
   const mat=new THREE.MeshLambertMaterial({{color,transparent:true,opacity:0.25,side:THREE.DoubleSide}});
-  const mesh=new THREE.Mesh(g,mat);scene.add(mesh);
+  const mesh=new THREE.Mesh(g,mat);
+  if(!catGroups[m.cat]){{catGroups[m.cat]=new THREE.Group();buildingGroup.add(catGroups[m.cat]);}}
+  catGroups[m.cat].add(mesh);
   bbox.expandByObject(mesh);
 }});
+scene.add(buildingGroup);
+// 屋根をデフォルト非表示
+Object.keys(HIDDEN_CATS).forEach(c=>{{if(catGroups[c])catGroups[c].visible=false;}});
 const center=new THREE.Vector3();bbox.getCenter(center);
 const size=bbox.getSize(new THREE.Vector3());
 const maxDim=Math.max(size.x,size.y,size.z);
@@ -561,6 +609,26 @@ kindOrder.forEach(k=>{{
 }});
 
 const ctrlDiv=document.getElementById('controls');
+
+// 建物表示トグル
+let showB=true;
+const btnB=document.createElement('button');
+btnB.style.background='#666';btnB.textContent='建物表示';btnB.className='active';
+btnB.onclick=()=>{{showB=!showB;buildingGroup.visible=showB;btnB.className=showB?'active':'inactive';}};
+ctrlDiv.appendChild(btnB);
+
+// 屋根トグル（デフォルト非表示）
+if(catGroups['屋根']){{
+  const btnR=document.createElement('button');
+  btnR.style.background='#cc3333';btnR.textContent='屋根表示';btnR.className='inactive';
+  btnR.onclick=()=>{{
+    const g=catGroups['屋根'];g.visible=!g.visible;
+    btnR.className=g.visible?'active':'inactive';
+  }};
+  ctrlDiv.appendChild(btnR);
+}}
+
+// 額縁種別トグル
 kindOrder.forEach(k=>{{
   if(!TYPE_TOTALS[k]) return;
   const btn=document.createElement('button');
@@ -572,6 +640,20 @@ kindOrder.forEach(k=>{{
   }};
   ctrlDiv.appendChild(btn);
 }});
+
+// カテゴリ凡例（クリックで個別ON/OFF）
+const cats=[...new Set(MESHES.map(m=>m.cat))];
+if(cats.length>0){{
+  const sep=document.createElement('div');sep.style.borderTop='1px solid rgba(255,255,255,0.3)';
+  sep.style.margin='4px 0';sep.style.width='100%';ctrlDiv.appendChild(sep);
+  cats.forEach(cat=>{{
+    const d=document.createElement('button');
+    d.style.background=MESH_CSS[cat]||'#888';d.textContent=cat;
+    d.className=HIDDEN_CATS[cat]?'inactive':'active';d.style.fontSize='11px';
+    d.onclick=()=>{{if(catGroups[cat]){{catGroups[cat].visible=!catGroups[cat].visible;d.className=catGroups[cat].visible?'active':'inactive';}}}};
+    ctrlDiv.appendChild(d);
+  }});
+}}
 
 const tooltip=document.getElementById('tooltip');
 const raycaster=new THREE.Raycaster();raycaster.params.Line={{threshold:0.05}};
