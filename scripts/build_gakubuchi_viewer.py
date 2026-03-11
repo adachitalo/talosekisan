@@ -67,6 +67,78 @@ DIMENSION_OFFSETS = {
     "SL":   (0, 0),
 }
 
+# ============================================================================
+# 規格寸法マスタ（CAD入力ミス検出用）
+# マーカー名 → (W, H) のログ壁開口寸法 (mm)
+# ============================================================================
+SIZE_MASTER = {
+    "VMW-1": (450, 597), "VMW-1(FIX)": (450, 597), "VMW-1(OBS)": (450, 597),
+    "VMW-2": (889, 533), "VMW-3": (533, 889), "VMW-3(FIX)": (533, 889),
+    "VMW-3(OBS)": (533, 889), "VMW-3+VMW-4": (1600, 889),
+    "VMW-4": (1067, 889), "VMW-4a": (1422, 889),
+    "VMW-5": (533, 1041), "VMW-6": (1067, 1041), "VMW-6a": (1422, 1041),
+    "VMW-11": (533, 1194), "VMW-13": (1600, 1194), "VMW-13b": (1955, 1194),
+    "VMSD": (1505, 2019), "VMSD-1": (1505, 2019),
+    "VMSD 1505x2019": (1505, 2019), "VMSD 1810x2019": (1810, 2019),
+    "VMSD 2419x2019": (2419, 2019),
+}
+
+# 規格寸法 → 品番 の逆引き
+_SIZE_TO_CODE = {}
+for _code, (_sw, _sh) in SIZE_MASTER.items():
+    _key = f"{_sw}x{_sh}"
+    if _key not in _SIZE_TO_CODE:
+        _SIZE_TO_CODE[_key] = []
+    if _code not in _SIZE_TO_CODE[_key]:
+        _SIZE_TO_CODE[_key].append(_code)
+
+
+def validate_dimensions(marker: str, frame_w: float, frame_h: float, tolerance: int = 30):
+    """マーカー名と開口寸法を規格値と照合。不一致なら辞書を返す。"""
+    # マーカーからベースコードを推定 (例: "AW3 Vmw" → VMW, label "NV Door1" → NV)
+    base = marker.split()[0].upper() if marker else ""
+    # SIZE_MASTERのキーで一致するものを探す
+    spec = None
+    matched_code = None
+    for code in SIZE_MASTER:
+        if code.upper() == base or base.startswith(code.upper()):
+            spec = SIZE_MASTER[code]
+            matched_code = code
+            break
+    # TypeDefベースのftype名でも検索 (例: VMW-3)
+    if spec is None:
+        for code in SIZE_MASTER:
+            if code.upper() in marker.upper():
+                spec = SIZE_MASTER[code]
+                matched_code = code
+                break
+    if spec is None:
+        return None  # 規格マスタにない品番
+
+    spec_w, spec_h = spec
+    fw, fh = round(frame_w), round(frame_h)
+    if abs(fw - spec_w) <= tolerance and abs(fh - spec_h) <= tolerance:
+        return None  # OK
+
+    # 不一致 → 実寸法から正しい品番を逆引き
+    actual_key = f"{fw}x{fh}"
+    suggestion = _SIZE_TO_CODE.get(actual_key, [])
+    if not suggestion:
+        # 近似検索
+        for key, codes in _SIZE_TO_CODE.items():
+            kw, kh = map(int, key.split("x"))
+            if abs(kw - fw) <= tolerance and abs(kh - fh) <= tolerance:
+                suggestion = codes
+                break
+
+    return {
+        "marker": matched_code or base,
+        "spec_w": spec_w, "spec_h": spec_h,
+        "actual_w": fw, "actual_h": fh,
+        "suggestion": [c for c in suggestion if c.upper() != (matched_code or base).upper()],
+    }
+
+
 NW_SMALL_W_OFFSET = 280  # NW小型ドア(W<800)用
 
 # 間仕切り壁の場合のオフセット差分 (NVのW offsetが変わる)
@@ -469,6 +541,9 @@ def detect_fixtures_and_frames(ifc_file):
             w_m = ifc_w / 1000.0
             h_m = ifc_h / 1000.0
 
+            # 規格寸法チェック
+            dim_error = validate_dimensions(label, frame_w, frame_h)
+
             fixtures_info.append({
                 "label": label,
                 "ftype": ftype,
@@ -476,6 +551,7 @@ def detect_fixtures_and_frames(ifc_file):
                 "h_mm": ifc_h,
                 "frame_w": frame_w,
                 "frame_h": frame_h,
+                "dim_error": dim_error,
             })
 
             pieces = generate_frame_pieces(ftype, frame_w, frame_h, wall_type)
@@ -560,13 +636,43 @@ KIND_CSS = {
 }
 
 
-def generate_html(model_name, meshes, frames, fixtures_info, type_totals):
+def generate_html(model_name, meshes, frames, fixtures_info, type_totals, dim_errors=None):
     """Three.js 3Dビューア付きHTMLを生成（廻り縁・巾木ビューアと統一UI）"""
 
     fixture_count = len(fixtures_info)
     meshes_json = json.dumps(meshes, separators=(",", ":"))
     frames_json = json.dumps(frames, separators=(",", ":"))
     totals_json = json.dumps(type_totals, separators=(",", ":"), ensure_ascii=False)
+
+    # 寸法エラー警告パネル
+    dim_warn_html = ""
+    if dim_errors:
+        rows = ""
+        for fi in dim_errors:
+            e = fi["dim_error"]
+            sug = ", ".join(e["suggestion"]) if e["suggestion"] else "該当なし"
+            rows += (f'<tr><td style="font-weight:700;color:#ff4444">{e["marker"]}</td>'
+                     f'<td>{e["spec_w"]}</td><td>{e["spec_h"]}</td>'
+                     f'<td style="color:#ff4444;font-weight:700">{e["actual_w"]}</td>'
+                     f'<td style="color:#ff4444;font-weight:700">{e["actual_h"]}</td>'
+                     f'<td style="font-weight:700">{sug}</td></tr>')
+        dim_warn_html = (
+            f'<div id="dim-warn" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);'
+            f'z-index:300;background:rgba(30,0,0,0.95);border:2px solid #ff4444;border-radius:12px;'
+            f'padding:20px 24px;color:#fff;font-size:13px;max-width:600px;backdrop-filter:blur(4px)">'
+            f'<div style="font-size:16px;font-weight:700;color:#ff4444;margin-bottom:10px">'
+            f'⚠ CAD寸法エラー検出 ({len(dim_errors)}件)</div>'
+            f'<table style="width:100%;border-collapse:collapse;color:#eee">'
+            f'<tr style="color:#ff8888;font-size:11px;border-bottom:1px solid #444">'
+            f'<th style="text-align:left;padding:4px">品番</th>'
+            f'<th>規格W</th><th>規格H</th><th>実W</th><th>実H</th><th>推定正解</th></tr>'
+            f'{rows}</table>'
+            f'<div style="font-size:11px;color:#ff8888;margin-top:8px">'
+            f'マーカー名に対して実際の寸法が規格と一致しません</div>'
+            f'<button onclick="document.getElementById(\'dim-warn\').style.display=\'none\'" '
+            f'style="margin-top:10px;background:#ff4444;color:#fff;border:none;padding:6px 16px;'
+            f'border-radius:4px;cursor:pointer;font-size:13px">閉じる</button></div>'
+        )
 
     return f'''<!DOCTYPE html>
 <html lang="ja">
@@ -606,6 +712,7 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 <div id="legend"></div>
 <div id="controls"></div>
 <div id="tooltip"></div>
+{dim_warn_html}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
@@ -810,13 +917,24 @@ def main():
     fixtures_info, frames = detect_fixtures_and_frames(ifc_file)
     print(f"  {len(fixtures_info)} fixtures → {len(frames)} frame lines")
 
+    # 規格寸法チェック
+    dim_errors = [fi for fi in fixtures_info if fi.get("dim_error")]
+    if dim_errors:
+        print(f"\n  ⚠ CAD寸法エラー検出: {len(dim_errors)}件")
+        for fi in dim_errors:
+            e = fi["dim_error"]
+            sug = ", ".join(e["suggestion"]) if e["suggestion"] else "該当なし"
+            print(f"    {e['marker']}: 規格={e['spec_w']}×{e['spec_h']} "
+                  f"→ 実際={e['actual_w']}×{e['actual_h']} 推定正解={sug}")
+        print()
+
     type_totals = defaultdict(float)
     for f in frames:
         type_totals[f["kind"]] += f["length"] / 1000.0
     type_totals = {k: round(v, 2) for k, v in type_totals.items()}
 
     print("Generating HTML viewer...")
-    html = generate_html(model_name, meshes, frames, fixtures_info, type_totals)
+    html = generate_html(model_name, meshes, frames, fixtures_info, type_totals, dim_errors)
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
@@ -839,6 +957,9 @@ def main():
         "model": model_name,
         "type_totals": {k: round(v, 2) for k, v in type_totals.items()},
         "grand_total": round(total, 2),
+        "dim_errors": [
+            fi["dim_error"] for fi in fixtures_info if fi.get("dim_error")
+        ],
         "fixtures": [
             {
                 "label": fi["label"],
