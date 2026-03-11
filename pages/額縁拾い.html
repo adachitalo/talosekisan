@@ -353,6 +353,8 @@ function toggleType(itemIdx, type) {
   if(type === '__wall__') {
     if(item.wall === 'partition') {
       item.wall = 'log';
+      // ログ壁に戻したらT-barを自動オン
+      if(!item.t.includes('T-bar')) item.t.push('T-bar');
     } else {
       item.wall = 'partition';
       // 間仕切壁にはT-barがつかないので自動オフ
