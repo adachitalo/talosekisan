@@ -37,26 +37,261 @@ CATEGORY_COLORS = {
 
 
 ###############################################################################
-# 屋根勾配天井パラメータ（IFC屋根メッシュ底面から算出）
-# 切妻屋根: 棟がZ方向に走り、X方向に勾配
+# 屋根勾配パラメータ自動検出
 ###############################################################################
-RIDGE_X = 3.500       # 棟のX座標
-RIDGE_Y = 5.880       # 棟での天井高さ（棟木下端＝屋根底面）
-EAVE_LEFT_X = -0.778  # 左軒先の屋根底面X座標
-EAVE_RIGHT_X = 7.778  # 右軒先の屋根底面X座標
-EAVE_Y = 3.313        # 軒先での屋根底面Y座標
+# グローバル変数（main()内で自動検出結果で上書き）
+RIDGE_AXIS = "z"      # 棟が走る軸 ("x" or "z")
+SLOPE_AXIS = "x"      # 勾配が変わる軸 ("x" or "z")
+RIDGE_POS = 3.500     # 棟の slope_axis 座標
+RIDGE_HEIGHT = 5.880  # 棟での天井高さ（Y）
+EAVE_POS_MIN = -0.778 # 軒先1の slope_axis 座標
+EAVE_POS_MAX = 7.778  # 軒先2の slope_axis 座標
+EAVE_HEIGHT = 3.313   # 軒先での天井高さ（Y）
 
 
-def roof_ceiling_y(x):
-    """屋根勾配天井のY座標を返す（切妻屋根）"""
-    if x <= RIDGE_X:
-        if abs(RIDGE_X - EAVE_LEFT_X) < 0.01:
-            return RIDGE_Y
-        return EAVE_Y + (RIDGE_Y - EAVE_Y) * (x - EAVE_LEFT_X) / (RIDGE_X - EAVE_LEFT_X)
+def detect_roof_params(ifc, settings):
+    """IFC屋根メッシュから勾配天井パラメータを自動検出。
+    面法線で屋根底面（天井面）を特定し、棟の方向・位置を算出。
+    Returns dict with ridge_axis, slope_axis, ridge_pos, ridge_height,
+    eave_pos_min, eave_pos_max, eave_height (all in Three.js coords).
+    """
+    bottom_verts = []  # 下向き法線の面の頂点（屋根底面＝天井面）
+
+    for slab in ifc.by_type("IfcSlab"):
+        ename = (slab.Name or "").lower()
+        if "yane" not in ename and "roof" not in ename:
+            continue
+        try:
+            shape = ifcopenshell.geom.create_shape(settings, slab)
+            vf = shape.geometry.verts
+            ff = shape.geometry.faces
+            pts = []
+            for i in range(0, len(vf), 3):
+                pts.append([vf[i], vf[i+2], -vf[i+1]])
+            pts = np.array(pts)
+            for i in range(0, len(ff), 3):
+                i0, i1, i2 = ff[i], ff[i+1], ff[i+2]
+                p0, p1, p2 = pts[i0], pts[i1], pts[i2]
+                normal = np.cross(p1 - p0, p2 - p0)
+                norm_len = np.linalg.norm(normal)
+                if norm_len < 1e-10:
+                    continue
+                normal = normal / norm_len
+                if normal[1] < -0.3:
+                    bottom_verts.extend([pts[i0], pts[i1], pts[i2]])
+        except Exception as e:
+            print(f"  Error processing slab: {e}")
+
+    for roof in ifc.by_type("IfcRoof"):
+        try:
+            shape = ifcopenshell.geom.create_shape(settings, roof)
+            vf = shape.geometry.verts
+            ff = shape.geometry.faces
+            pts = []
+            for i in range(0, len(vf), 3):
+                pts.append([vf[i], vf[i+2], -vf[i+1]])
+            pts = np.array(pts)
+            for i in range(0, len(ff), 3):
+                i0, i1, i2 = ff[i], ff[i+1], ff[i+2]
+                p0, p1, p2 = pts[i0], pts[i1], pts[i2]
+                normal = np.cross(p1 - p0, p2 - p0)
+                norm_len = np.linalg.norm(normal)
+                if norm_len < 1e-10:
+                    continue
+                normal = normal / norm_len
+                if normal[1] < -0.3:
+                    bottom_verts.extend([pts[i0], pts[i1], pts[i2]])
+        except Exception:
+            pass
+
+    if not bottom_verts:
+        print("WARNING: No roof underside faces found!")
+        return None
+
+    bv = np.array(bottom_verts)
+    bv = np.unique(np.round(bv, 3), axis=0)
+
+    print(f"  Roof underside vertices: {len(bv)} unique points")
+    print(f"    X range: [{bv[:,0].min():.3f}, {bv[:,0].max():.3f}]")
+    print(f"    Y range: [{bv[:,1].min():.3f}, {bv[:,1].max():.3f}]")
+    print(f"    Z range: [{bv[:,2].min():.3f}, {bv[:,2].max():.3f}]")
+
+    # 棟: Y最高の底面頂点群
+    ridge_height = bv[:, 1].max()
+    ridge_tol = 0.15
+    ridge_mask = bv[:, 1] > ridge_height - ridge_tol
+    ridge_pts = bv[ridge_mask]
+
+    # 棟の方向: X方向スパン vs Z方向スパン
+    ridge_x_span = ridge_pts[:, 0].max() - ridge_pts[:, 0].min()
+    ridge_z_span = ridge_pts[:, 2].max() - ridge_pts[:, 2].min()
+
+    if ridge_x_span > ridge_z_span:
+        ridge_axis = "x"
+        slope_axis = "z"
+        ridge_pos = float(np.median(ridge_pts[:, 2]))
+        eave_pos_min = float(bv[:, 2].min())
+        eave_pos_max = float(bv[:, 2].max())
     else:
-        if abs(EAVE_RIGHT_X - RIDGE_X) < 0.01:
-            return RIDGE_Y
-        return EAVE_Y + (RIDGE_Y - EAVE_Y) * (EAVE_RIGHT_X - x) / (EAVE_RIGHT_X - RIDGE_X)
+        ridge_axis = "z"
+        slope_axis = "x"
+        ridge_pos = float(np.median(ridge_pts[:, 0]))
+        eave_pos_min = float(bv[:, 0].min())
+        eave_pos_max = float(bv[:, 0].max())
+
+    # 軒先高さ: slope_axis端の頂点Y
+    if slope_axis == "x":
+        eave_mask = (np.abs(bv[:, 0] - eave_pos_min) < 0.3) | \
+                    (np.abs(bv[:, 0] - eave_pos_max) < 0.3)
+    else:
+        eave_mask = (np.abs(bv[:, 2] - eave_pos_min) < 0.3) | \
+                    (np.abs(bv[:, 2] - eave_pos_max) < 0.3)
+    eave_pts = bv[eave_mask]
+    eave_height = float(eave_pts[:, 1].min()) if len(eave_pts) > 0 else float(bv[:, 1].min())
+
+    result = {
+        "ridge_axis": ridge_axis,
+        "slope_axis": slope_axis,
+        "ridge_pos": ridge_pos,
+        "ridge_height": float(ridge_height),
+        "eave_pos_min": eave_pos_min,
+        "eave_pos_max": eave_pos_max,
+        "eave_height": eave_height,
+    }
+
+    print(f"\n  Detected roof parameters:")
+    print(f"    Ridge axis: {ridge_axis} (ridge runs along {ridge_axis.upper()})")
+    print(f"    Slope axis: {slope_axis} (slope varies along {slope_axis.upper()})")
+    print(f"    Ridge position ({slope_axis.upper()}): {ridge_pos:.3f}")
+    print(f"    Ridge height (Y): {ridge_height:.3f}")
+    print(f"    Eave positions ({slope_axis.upper()}): [{eave_pos_min:.3f}, {eave_pos_max:.3f}]")
+    print(f"    Eave height (Y): {eave_height:.3f}")
+
+    return result
+
+
+def detect_ceiling_levels(ifc, settings, roof_params):
+    """IFCジオメトリから天井レベルを自動検出。
+    1F天井: 2-yuka スラブ下面（なければNone = 平屋）
+    2F天井: ログ壁top_y分布のギャップ解析
+    """
+    # --- 1F天井: 2-yuka スラブ下面 ---
+    ceiling_1f = None
+    for slab in ifc.by_type("IfcSlab"):
+        ename = (slab.Name or "").lower()
+        if ename == "2-yuka":
+            try:
+                shape = ifcopenshell.geom.create_shape(settings, slab)
+                vf = shape.geometry.verts
+                ys = [vf[i+2] for i in range(0, len(vf), 3)]  # IFC Z → Three.js Y
+                ceiling_1f = min(ys)
+                print(f"  ceiling_1f from 2-yuka slab bottom: {ceiling_1f:.3f}")
+            except Exception:
+                pass
+
+    if ceiling_1f is None:
+        # 平屋の可能性 → majikiri壁から推定試行
+        majikiri_tops = []
+        for wall in ifc.by_type("IfcWall"):
+            ename = wall.Name or ""
+            if ename.startswith("majikiri"):
+                try:
+                    shape = ifcopenshell.geom.create_shape(settings, wall)
+                    vf = shape.geometry.verts
+                    ys = [vf[i+2] for i in range(0, len(vf), 3)]
+                    majikiri_tops.append(max(ys))
+                except Exception:
+                    pass
+        if majikiri_tops:
+            ceiling_1f = float(np.median(majikiri_tops))
+            print(f"  ceiling_1f from majikiri wall tops (median): {ceiling_1f:.3f}")
+        else:
+            print(f"  ceiling_1f: None (平屋/no 2-yuka, no majikiri)")
+
+    # --- 2F天井: ログ壁top_y分布のギャップ解析 ---
+    ceiling_2f = None
+    if roof_params:
+        eave_height = roof_params["eave_height"]
+        ridge_axis = roof_params["ridge_axis"]
+        ridge_height = roof_params["ridge_height"]
+
+        log_tops = []
+        for wall in ifc.by_type("IfcWall"):
+            ename = wall.Name or ""
+            if not ename.startswith("log"):
+                continue
+            try:
+                shape = ifcopenshell.geom.create_shape(settings, wall)
+                vf = shape.geometry.verts
+                pts_3js = []
+                for i in range(0, len(vf), 3):
+                    pts_3js.append([vf[i], vf[i+2], -vf[i+1]])
+                pts_3js = np.array(pts_3js)
+                top_y = float(pts_3js[:, 1].max())
+                log_tops.append(top_y)
+            except Exception:
+                pass
+
+        if log_tops:
+            # ギャップ解析: 壁top_yの分布でeave_heightに最も近いギャップを探す
+            sorted_tops = sorted(set(round(t, 2) for t in log_tops))
+            print(f"  Log wall top_y values: {sorted_tops}")
+
+            best_gap = None
+            best_gap_dist = float('inf')
+            for i in range(len(sorted_tops) - 1):
+                gap = sorted_tops[i+1] - sorted_tops[i]
+                gap_mid = (sorted_tops[i] + sorted_tops[i+1]) / 2
+                dist_to_eave = abs(gap_mid - eave_height)
+                if gap > 0.3 and dist_to_eave < best_gap_dist:
+                    best_gap = i
+                    best_gap_dist = dist_to_eave
+
+            if best_gap is not None:
+                ceiling_2f = sorted_tops[best_gap + 1]
+                print(f"  ceiling_2f from gap analysis: {ceiling_2f:.3f}"
+                      f" (gap {sorted_tops[best_gap]:.2f}→{sorted_tops[best_gap+1]:.2f})")
+            else:
+                # フォールバック: eave_height + 0.5
+                ceiling_2f = eave_height + 0.5
+                print(f"  ceiling_2f fallback (eave_height + 0.5): {ceiling_2f:.3f}")
+
+    has_2yuka = any((slab.Name or "").lower() == "2-yuka" for slab in ifc.by_type("IfcSlab"))
+
+    return {
+        "ceiling_1f": ceiling_1f,
+        "ceiling_2f": ceiling_2f,
+        "has_2yuka": has_2yuka,
+    }
+
+
+def roof_ceiling_y(slope_coord):
+    """屋根勾配天井のY座標を返す（切妻屋根、汎用軸対応）
+    slope_coord: SLOPE_AXIS上の座標（ie4d1ならX、HI-4AならZ）
+    """
+    if slope_coord <= RIDGE_POS:
+        if abs(RIDGE_POS - EAVE_POS_MIN) < 0.01:
+            return RIDGE_HEIGHT
+        return EAVE_HEIGHT + (RIDGE_HEIGHT - EAVE_HEIGHT) * \
+            (slope_coord - EAVE_POS_MIN) / (RIDGE_POS - EAVE_POS_MIN)
+    else:
+        if abs(EAVE_POS_MAX - RIDGE_POS) < 0.01:
+            return RIDGE_HEIGHT
+        return EAVE_HEIGHT + (RIDGE_HEIGHT - EAVE_HEIGHT) * \
+            (EAVE_POS_MAX - slope_coord) / (EAVE_POS_MAX - RIDGE_POS)
+
+
+def get_slope_coord_from_face(face_coord, direction):
+    """壁面のface_coordからslope_axis上の座標を取得。
+    eave壁(direction==RIDGE_AXIS)のface_coordはslope_axis上の値。
+    gable壁(direction==SLOPE_AXIS)のface_coordはridge_axis上の値。
+    """
+    if direction == RIDGE_AXIS:
+        # eave壁: face_coord = slope_axis座標
+        return face_coord
+    else:
+        # gable壁: face_coordはridge_axis座標、slope_coordは壁の範囲で変わる
+        return None  # 個別に処理
 
 
 def classify_wall_full(name):
@@ -99,7 +334,6 @@ def extract_wall_edges(verts_flat):
     if dx > dz:
         direction = "x"
         x_min, x_max = float(bottom[:, 0].min()), float(bottom[:, 0].max())
-        # 全頂点のX範囲（底面が狭い壁用）
         full_x_min, full_x_max = float(pts[:, 0].min()), float(pts[:, 0].max())
         z_vals = np.unique(np.round(bottom[:, 2], 2))
         if len(z_vals) < 2:
@@ -125,7 +359,6 @@ def extract_wall_edges(verts_flat):
     else:
         direction = "z"
         z_min, z_max = float(bottom[:, 2].min()), float(bottom[:, 2].max())
-        # 全頂点のZ範囲（底面が狭い壁用: 軒先延長壁等）
         full_z_min, full_z_max = float(pts[:, 2].min()), float(pts[:, 2].max())
         x_vals = np.unique(np.round(bottom[:, 0], 2))
         if len(x_vals) < 2:
@@ -189,11 +422,7 @@ def wall_cross_section_at_y(vf_raw, ff_raw, y_level, tol=0.01):
 
 
 def extract_molding_from_cross_section(vf_raw, ff_raw, y_level, direction):
-    """
-    壁メッシュのY=y_levelでの断面から廻り縁ラインセグメントを抽出。
-    壁の主方向に沿った長い線分を各面ごとにグループ化して返す。
-    Returns: {face_coord: [([x,y,z],[x,y,z]), ...], ...}
-    """
+    """壁メッシュのY=y_levelでの断面から廻り縁ラインセグメントを抽出。"""
     cs_segs = wall_cross_section_at_y(vf_raw, ff_raw, y_level)
     face_segments = defaultdict(list)
     for p1, p2 in cs_segs:
@@ -213,7 +442,6 @@ def extract_molding_from_cross_section(vf_raw, ff_raw, y_level, direction):
                 z_min = min(p1[1], p2[1])
                 z_max = max(p1[1], p2[1])
                 face_segments[x_face].append((z_min, z_max))
-    # 各面のセグメントをマージ
     result = {}
     for face_coord, segs in face_segments.items():
         segs.sort()
@@ -393,11 +621,71 @@ def clip_segment_to_slab(p1, p2, slab_tris, direction, n_samples=20):
     return results
 
 
+def get_wall_full_range(info, axis):
+    """壁のfull_x_range or full_z_rangeを取得（フォールバック付き）"""
+    if axis == "x":
+        if "full_x_range" in info:
+            return info["full_x_range"]
+        return (min(e[0] for edge in info["edges"] for e in edge),
+                max(e[0] for edge in info["edges"] for e in edge))
+    else:
+        if "full_z_range" in info:
+            return info["full_z_range"]
+        return (min(e[2] for edge in info["edges"] for e in edge),
+                max(e[2] for edge in info["edges"] for e in edge))
+
+
+def get_wall_range_along_axis(info, axis):
+    """壁の指定軸方向の範囲を取得"""
+    if axis == "x":
+        return get_wall_full_range(info, "x")
+    else:
+        return get_wall_full_range(info, "z")
+
+
+def make_segment_along_direction(direction, face_coord, range_min, range_max, y_val):
+    """壁方向に沿ったセグメントを生成"""
+    if direction == "x":
+        return [range_min, y_val, face_coord], [range_max, y_val, face_coord]
+    else:
+        return [face_coord, y_val, range_min], [face_coord, y_val, range_max]
+
+
 def main():
+    global RIDGE_AXIS, SLOPE_AXIS, RIDGE_POS, RIDGE_HEIGHT
+    global EAVE_POS_MIN, EAVE_POS_MAX, EAVE_HEIGHT
+
     print("IFC読み込み中...")
     ifc = ifcopenshell.open(IFC_PATH)
     settings = ifcopenshell.geom.settings()
     settings.set(settings.USE_WORLD_COORDS, True)
+
+    # === 屋根パラメータ自動検出 ===
+    print("\n--- 屋根パラメータ自動検出 ---")
+    roof_params = detect_roof_params(ifc, settings)
+    if roof_params:
+        RIDGE_AXIS = roof_params["ridge_axis"]
+        SLOPE_AXIS = roof_params["slope_axis"]
+        RIDGE_POS = roof_params["ridge_pos"]
+        RIDGE_HEIGHT = roof_params["ridge_height"]
+        EAVE_POS_MIN = roof_params["eave_pos_min"]
+        EAVE_POS_MAX = roof_params["eave_pos_max"]
+        EAVE_HEIGHT = roof_params["eave_height"]
+    else:
+        print("  WARNING: 屋根パラメータ検出失敗、デフォルト値を使用")
+
+    # === 天井レベル自動検出 ===
+    print("\n--- 天井レベル自動検出 ---")
+    ceiling_info = detect_ceiling_levels(ifc, settings, roof_params)
+    ceiling_1f = ceiling_info["ceiling_1f"]
+    ceiling_2f = ceiling_info["ceiling_2f"]
+    has_2yuka = ceiling_info["has_2yuka"]
+
+    # 平屋判定: 2-yukaスラブがない
+    is_single_story = not has_2yuka
+    if is_single_story:
+        print(f"\n  *** 平屋建物検出（2-yukaスラブなし）***")
+        print(f"  → 1F水平天井セクションをスキップ、全壁を2F/屋根として処理")
 
     skip_types = {"IfcBuildingElementProxy", "IfcCovering"}
     seen_ids = set()
@@ -440,7 +728,7 @@ def main():
     # === Part 2: 壁ジオメトリ解析 ===
     print("\n壁ジオメトリ解析中...")
     seen2 = set()
-    wall_data = []  # (cat, gid, ename, info, vf_raw, ff_raw)
+    wall_data = []
 
     for wall in ifc.by_type("IfcWall"):
         gid = wall.GlobalId
@@ -470,295 +758,270 @@ def main():
         except Exception:
             pass
 
-    # === 天井レベル定義 ===
-    # 1F天井: 2Fスラブ下面 Y=2.671m（間仕切壁上端と一致）
-    # 2F天井: 桁レベル Y=3.780m（妻壁を除くログ壁上端）
-    CEILING_LEVELS = {
-        "1F": {"ceiling_y": 2.671, "cut_offset": -0.05},  # 天井面の少し下で断面
-        "2F": {"ceiling_y": 3.780, "cut_offset": -0.05},
-    }
-
-    # === 1F廻り縁対象壁: 天井高さまで達する壁 ===
-    ceiling_1f = CEILING_LEVELS["1F"]["ceiling_y"]
-    walls_1f_raw = [(c, g, n, inf, vf, ff) for c, g, n, inf, vf, ff in wall_data
-                    if inf["top_y"] > ceiling_1f - 0.1]  # 壁上端が天井に達する
-    walls_1f = [(c, g, n, inf) for c, g, n, inf, vf, ff in walls_1f_raw]
-
-    # === 2F廻り縁対象壁: 桁レベルまで達するログ壁 ===
-    ceiling_2f = CEILING_LEVELS["2F"]["ceiling_y"]
-    walls_2f_raw = []
-    seen_2f = set()
-    for wall in ifc.by_type("IfcWall"):
-        gid = wall.GlobalId
-        if gid in seen_2f:
-            continue
-        seen_2f.add(gid)
-        ename = wall.Name or ""
-        if any(ename.startswith(p) for p in SKIP):
-            continue
-        cat = None
-        for k, v in WALL_SUB.items():
-            if ename.startswith(k):
-                cat = v
-                break
-        if cat != "ログ壁":
-            continue
-        try:
-            shape = ifcopenshell.geom.create_shape(settings, wall)
-            vf = shape.geometry.verts
-            ff = shape.geometry.faces
-            verts_3js = []
-            for i in range(0, len(vf), 3):
-                verts_3js.extend([vf[i], vf[i + 2], -vf[i + 1]])
-            info = extract_wall_edges(verts_3js)
-            if info and info["top_y"] > ceiling_2f - 0.1:
-                walls_2f_raw.append((cat, gid, ename, info, list(vf), list(ff)))
-        except Exception:
-            pass
-
-    walls_2f = [(c, g, n, inf) for c, g, n, inf, vf, ff in walls_2f_raw]
-
-    print(f"  1F廻り縁対象壁: {len(walls_1f)}本")
-    print(f"  2F廻り縁対象壁: {len(walls_2f)}本（桁レベル Y={ceiling_2f}mまで達するログ壁）")
-
-    # === スラブメッシュ取得（1F天井クリッピング用のみ） ===
-    # 1F天井: 2Fスラブの下面（= 1F天井面）の範囲でクリップ
-    # 2F天井: スラブクリッピングなし（階段開口は影響しない）
-    print("  スラブメッシュを取得中...")
-    slab_tris_1f_ceiling = []  # 1F天井用: 2Fスラブ下面
-    for slab in ifc.by_type("IfcSlab"):
-        ename = slab.Name or ""
-        try:
-            if ename == "2-yuka":
-                tris_bottom = extract_slab_bottom_tris(slab, settings)
-                slab_tris_1f_ceiling.extend(tris_bottom)
-                print(f"    {ename} 下面: {len(tris_bottom)}三角形 → 1F天井クリッピング")
-        except Exception:
-            pass
-
     # === 廻り縁ライン生成 ===
-    # 変更点:
-    #   - 全面使用（室内/屋外の区別なし）
-    #   - 壁フルエクステント使用（開口部の影響なし）
-    #   - 2Fはスラブクリッピングなし（階段開口は影響しない）
-    #   - 集成梁（屋根接触部）の廻り縁を追加
-    #
-    # 廻り縁部材種別:
-    #   廻り縁１: 1F天井×ログ壁, 1F天井×梁, 2F勾配天井×ログ壁(斜め)
-    #   廻り縁２: 1F天井×間仕切壁, 2F水平天井×ログ壁/梁(上側), 2F天井×棟木
-    #   廻り縁３: 2F水平天井×ログ壁/梁(下側)
     molding_lines = []
     total_by_floor = defaultdict(float)
-    total_by_type = defaultdict(float)  # 廻り縁１/２/３別集計
+    total_by_type = defaultdict(float)
 
-    def slope_side_at(x_face, face_coords_all):
-        """Z方向壁/梁の面が勾配の上側か下側かを判定"""
-        # face_coordsが1つしかない場合は上側とする
-        if len(face_coords_all) < 2:
+    def slope_side_at(fc_slope, face_coords_all_slope):
+        """eave壁（RIDGE_AXIS方向壁）の面が勾配の上側か下側かを判定。
+        fc_slope: 面のslope_axis座標
+        face_coords_all_slope: 壁全面のslope_axis座標リスト
+        """
+        if len(face_coords_all_slope) < 2:
             return "上側"
-        avg_x = sum(face_coords_all) / len(face_coords_all)
-        dist = abs(x_face - RIDGE_X)
-        avg_dist = abs(avg_x - RIDGE_X)
-        # 棟に近い（壁中心よりRIDGEに近い）面 → 上側
-        # 棟から遠い面 → 下側
-        # 棟上の壁（avg_x ≈ RIDGE_X）は両面とも上側
+        avg = sum(face_coords_all_slope) / len(face_coords_all_slope)
+        dist = abs(fc_slope - RIDGE_POS)
+        avg_dist = abs(avg - RIDGE_POS)
         if avg_dist < 0.3:
             return "上側"  # 棟上の壁
-        if avg_x < RIDGE_X:
-            # 左側の壁: 大きいX面が上側
-            return "上側" if x_face >= avg_x else "下側"
+        if avg < RIDGE_POS:
+            return "上側" if fc_slope >= avg else "下側"
         else:
-            # 右側の壁: 小さいX面が上側
-            return "上側" if x_face <= avg_x else "下側"
+            return "上側" if fc_slope <= avg else "下側"
 
-    # --- 1F天井: 壁フルエクステント + 2Fスラブクリッピング ---
-    cs_y_1f = ceiling_1f - 0.02  # 表示Y座標
+    # =================================================================
+    # 1F天井: 壁フルエクステント + 2Fスラブクリッピング
+    # =================================================================
+    if not is_single_story and ceiling_1f is not None:
+        # 1F対象壁: 天井高さまで達する壁
+        walls_1f_raw = [(c, g, n, inf, vf, ff) for c, g, n, inf, vf, ff in wall_data
+                        if inf["top_y"] > ceiling_1f - 0.1]
+        walls_1f = [(c, g, n, inf) for c, g, n, inf, vf, ff in walls_1f_raw]
 
-    print(f"\n  1F天井 (Y={ceiling_1f:.3f}m): {len(walls_1f_raw)}壁 [全面・フルエクステント]")
+        # スラブメッシュ取得（1F天井クリッピング用）
+        print("  スラブメッシュを取得中...")
+        slab_tris_1f_ceiling = []
+        for slab in ifc.by_type("IfcSlab"):
+            ename = slab.Name or ""
+            try:
+                if ename == "2-yuka":
+                    tris_bottom = extract_slab_bottom_tris(slab, settings)
+                    slab_tris_1f_ceiling.extend(tris_bottom)
+                    print(f"    {ename} 下面: {len(tris_bottom)}三角形 → 1F天井クリッピング")
+            except Exception:
+                pass
 
-    for cat, gid, ename, info, vf_raw, ff_raw in walls_1f_raw:
-        direction = info["direction"]
-        face_coords = info["face_coords"]  # 全面（室内/屋外区別なし）
+        cs_y_1f = ceiling_1f - 0.02
+        print(f"\n  1F天井 (Y={ceiling_1f:.3f}m): {len(walls_1f_raw)}壁 [全面・フルエクステント]")
 
-        wall_seg_total = 0
-        for fc in face_coords:
-            if direction == "z":
-                # フル頂点範囲を優先（底面が狭い壁対策: 軒先延長壁等）
-                if "full_z_range" in info:
-                    z_min, z_max = info["full_z_range"]
-                else:
-                    z_min = min(e[2] for edge in info["edges"] for e in edge)
-                    z_max = max(e[2] for edge in info["edges"] for e in edge)
-                p1 = [fc, cs_y_1f, z_min]
-                p2 = [fc, cs_y_1f, z_max]
-            else:
-                if "full_x_range" in info:
-                    x_min, x_max = info["full_x_range"]
-                else:
-                    x_min = min(e[0] for edge in info["edges"] for e in edge)
-                    x_max = max(e[0] for edge in info["edges"] for e in edge)
-                p1 = [x_min, cs_y_1f, fc]
-                p2 = [x_max, cs_y_1f, fc]
+        for cat, gid, ename, info, vf_raw, ff_raw in walls_1f_raw:
+            direction = info["direction"]
+            face_coords = info["face_coords"]
+            wall_seg_total = 0
 
-            # 1F: 2Fスラブ範囲でクリッピング（天井がある範囲のみ）
-            clipped = clip_segment_to_slab(p1, p2, slab_tris_1f_ceiling, direction)
+            for fc in face_coords:
+                # セグメント生成: 壁方向に沿ったフルエクステント
+                wall_range = get_wall_full_range(info, direction)
+                p1, p2 = make_segment_along_direction(
+                    direction, fc, wall_range[0], wall_range[1], cs_y_1f)
 
-            for sp1, sp2 in clipped:
-                seg_len = np.sqrt(sum((a - b) ** 2 for a, b in zip(sp1, sp2)))
-                if seg_len < 0.05:
-                    continue
-                # 1F: ログ壁/梁→廻り縁１, 間仕切壁→廻り縁２
-                mt = "廻り縁１" if cat == "ログ壁" else "廻り縁２"
-                wall_seg_total += seg_len
-                total_by_type[mt] += seg_len
-                molding_lines.append({
-                    "floor": "1F", "type": "wall", "cat": cat,
-                    "molding_type": mt,
-                    "seg": [[round(sp1[0], 4), round(sp1[1], 4), round(sp1[2], 4)],
-                            [round(sp2[0], 4), round(sp2[1], 4), round(sp2[2], 4)]],
-                    "length_m": round(seg_len, 4),
-                })
+                clipped = clip_segment_to_slab(p1, p2, slab_tris_1f_ceiling, direction)
 
-        total_by_floor["1F"] += wall_seg_total
-        print(f"    {cat:8s} {ename:15s} {len(face_coords)}面 → {wall_seg_total:.2f}m")
-
-    # --- 2F天井（勾配天井）: 全面・スラブクリップなし ---
-    print(f"\n  2F天井（勾配天井）: {len(walls_2f_raw)}壁 [全面・スラブクリップなし]")
-    print(f"    屋根勾配: 棟X={RIDGE_X:.1f} 棟Y={RIDGE_Y:.3f} 軒Y={EAVE_Y:.3f}")
-
-    for cat, gid, ename, info, vf_raw, ff_raw in walls_2f_raw:
-        direction = info["direction"]
-        face_coords = info["face_coords"]  # 全面使用
-        wall_seg_total = 0
-
-        if direction == "z":
-            # === Z方向壁（桁壁）: 水平ライン at roof_ceiling_y(x_face) ===
-            for x_face in face_coords:
-                ceil_y = roof_ceiling_y(x_face)
-                cut_y = min(ceil_y, info["top_y"]) - 0.02
-                if cut_y < 2.9:
-                    continue
-                # フル頂点範囲を優先（底面が狭い壁対策: 軒先延長壁等）
-                if "full_z_range" in info:
-                    z_min, z_max = info["full_z_range"]
-                else:
-                    z_min = min(e[2] for edge in info["edges"] for e in edge)
-                    z_max = max(e[2] for edge in info["edges"] for e in edge)
-                seg_len = abs(z_max - z_min)
-                if seg_len < 0.05:
-                    continue
-                # 2F水平: 上側→廻り縁２, 下側→廻り縁３
-                side = slope_side_at(x_face, face_coords)
-                mt = "廻り縁２" if side == "上側" else "廻り縁３"
-                wall_seg_total += seg_len
-                total_by_type[mt] += seg_len
-                molding_lines.append({
-                    "floor": "2F", "type": "wall", "cat": cat,
-                    "molding_type": mt, "slope_side": side,
-                    "seg": [[round(x_face, 4), round(cut_y, 4), round(z_min, 4)],
-                            [round(x_face, 4), round(cut_y, 4), round(z_max, 4)]],
-                    "length_m": round(seg_len, 4),
-                })
-
-            print(f"    {cat:8s} {ename:15s} Z方向(水平) {len(face_coords)}面 → {wall_seg_total:.2f}m")
-
-        else:
-            # === X方向壁（妻壁）: 勾配天井に沿った斜めライン ===
-            if "full_x_range" in info:
-                x_min, x_max = info["full_x_range"]
-            else:
-                x_min = min(e[0] for edge in info["edges"] for e in edge)
-                x_max = max(e[0] for edge in info["edges"] for e in edge)
-
-            for z_face in face_coords:
-                x_segments = []
-                if x_min < RIDGE_X and x_max > RIDGE_X:
-                    x_segments.append((x_min, RIDGE_X))
-                    x_segments.append((RIDGE_X, x_max))
-                else:
-                    x_segments.append((x_min, x_max))
-
-                for xs, xe in x_segments:
-                    y_s = min(roof_ceiling_y(xs), info["top_y"]) - 0.02
-                    y_e = min(roof_ceiling_y(xe), info["top_y"]) - 0.02
-                    if y_s < 2.9 and y_e < 2.9:
-                        continue
-                    seg_len = np.sqrt((xe - xs)**2 + (y_e - y_s)**2)
+                for sp1, sp2 in clipped:
+                    seg_len = np.sqrt(sum((a - b) ** 2 for a, b in zip(sp1, sp2)))
                     if seg_len < 0.05:
                         continue
-                    # 2F勾配: ログ壁×斜め → 廻り縁１
-                    mt = "廻り縁１"
+                    mt = "廻り縁１" if cat == "ログ壁" else "廻り縁２"
                     wall_seg_total += seg_len
                     total_by_type[mt] += seg_len
                     molding_lines.append({
-                        "floor": "2F", "type": "wall", "cat": cat,
+                        "floor": "1F", "type": "wall", "cat": cat,
                         "molding_type": mt,
-                        "seg": [[round(xs, 4), round(y_s, 4), round(z_face, 4)],
-                                [round(xe, 4), round(y_e, 4), round(z_face, 4)]],
+                        "seg": [[round(sp1[0], 4), round(sp1[1], 4), round(sp1[2], 4)],
+                                [round(sp2[0], 4), round(sp2[1], 4), round(sp2[2], 4)]],
                         "length_m": round(seg_len, 4),
                     })
 
-            print(f"    {cat:8s} {ename:15s} X方向(勾配) {len(face_coords)}面 → {wall_seg_total:.2f}m")
+            total_by_floor["1F"] += wall_seg_total
+            print(f"    {cat:8s} {ename:15s} {len(face_coords)}面 → {wall_seg_total:.2f}m")
+    else:
+        walls_1f_raw = []
+        slab_tris_1f_ceiling = []
+        if is_single_story:
+            print(f"\n  1F天井: スキップ（平屋建物）")
+        else:
+            print(f"\n  1F天井: スキップ（ceiling_1f未検出）")
 
-        total_by_floor["2F"] += wall_seg_total
+    # =================================================================
+    # 2F天井（勾配天井）: 全面・スラブクリップなし
+    # =================================================================
+    if ceiling_2f is not None:
+        # 2F対象壁: 桁レベルまで達するログ壁
+        walls_2f_raw = []
+        seen_2f = set()
+        for wall in ifc.by_type("IfcWall"):
+            gid = wall.GlobalId
+            if gid in seen_2f:
+                continue
+            seen_2f.add(gid)
+            ename = wall.Name or ""
+            if any(ename.startswith(p) for p in SKIP):
+                continue
+            cat = None
+            for k, v in WALL_SUB.items():
+                if ename.startswith(k):
+                    cat = v
+                    break
+            if cat != "ログ壁":
+                continue
+            try:
+                shape = ifcopenshell.geom.create_shape(settings, wall)
+                vf = shape.geometry.verts
+                ff = shape.geometry.faces
+                verts_3js = []
+                for i in range(0, len(vf), 3):
+                    verts_3js.extend([vf[i], vf[i + 2], -vf[i + 1]])
+                info = extract_wall_edges(verts_3js)
+                if info and info["top_y"] > ceiling_2f - 0.1:
+                    walls_2f_raw.append((cat, gid, ename, info, list(vf), list(ff)))
+            except Exception:
+                pass
 
-    # --- 2F桁レベル壁の廻り縁（軒側外壁: 桁で止まるZ方向壁） ---
-    # 桁レベル(≈2.880等)で屋根勾配天井と接する外壁の2F廻り縁
-    # これらの壁は top_y < ceiling_2f のため通常の2Fフィルターに含まれない
-    # Z方向壁なので両面処理: 上側(棟側)→廻り縁２、下側(軒側)→廻り縁３
-    # ※クリッピングなし：壁自身のz範囲（full_z_range）をそのまま使用
-    #   壁が存在し屋根が上にある箇所は全て廻り縁の対象（延長壁含む）
-    keta_walls_raw = []
-    for c, g, n, inf, vf, ff in wall_data:
-        if c != "ログ壁":
-            continue
-        if inf["direction"] != "z":
-            continue
-        # 桁レベル付近で止まる壁（通常の2Fフィルターに含まれない壁）
-        # ceiling_2fより明らかに低い & 軒先Y(EAVE_Y)より高い壁を対象
-        if inf["top_y"] < ceiling_2f - 0.1 and inf["top_y"] > EAVE_Y + 0.1:
-            keta_walls_raw.append((c, g, n, inf, vf, ff))
+        walls_2f = [(c, g, n, inf) for c, g, n, inf, vf, ff in walls_2f_raw]
 
-    if keta_walls_raw:
-        print(f"\n  2F桁レベル壁（軒側）: {len(keta_walls_raw)}壁")
-        for c, g, n, inf, vf, ff in keta_walls_raw:
-            face_coords = inf["face_coords"]
+        print(f"\n  2F天井（勾配天井）: {len(walls_2f_raw)}壁 [全面・スラブクリップなし]")
+        print(f"    棟軸={RIDGE_AXIS.upper()} 勾配軸={SLOPE_AXIS.upper()}"
+              f" 棟位置({SLOPE_AXIS.upper()})={RIDGE_POS:.3f}"
+              f" 棟高さ={RIDGE_HEIGHT:.3f} 軒高さ={EAVE_HEIGHT:.3f}")
+
+        for cat, gid, ename, info, vf_raw, ff_raw in walls_2f_raw:
+            direction = info["direction"]
+            face_coords = info["face_coords"]
             wall_seg_total = 0
 
-            for x_face in face_coords:
-                ceil_y = roof_ceiling_y(x_face)
-                if ceil_y <= EAVE_Y + 0.01:
-                    continue
-                cut_y = min(ceil_y, inf["top_y"]) - 0.02
-                if cut_y < 2.2:
-                    continue
-                if "full_z_range" in inf:
-                    z_min, z_max = inf["full_z_range"]
-                else:
-                    z_min = min(e[2] for edge in inf["edges"] for e in edge)
-                    z_max = max(e[2] for edge in inf["edges"] for e in edge)
-                seg_len = abs(z_max - z_min)
-                if seg_len < 0.05:
-                    continue
-                side = slope_side_at(x_face, face_coords)
-                mt = "廻り縁２" if side == "上側" else "廻り縁３"
-                wall_seg_total += seg_len
-                total_by_type[mt] += seg_len
-                molding_lines.append({
-                    "floor": "2F", "type": "wall", "cat": c,
-                    "molding_type": mt, "slope_side": side,
-                    "seg": [[round(x_face, 4), round(cut_y, 4), round(z_min, 4)],
-                            [round(x_face, 4), round(cut_y, 4), round(z_max, 4)]],
-                    "length_m": round(seg_len, 4),
-                })
+            if direction == RIDGE_AXIS:
+                # === eave壁（棟と平行）: 水平ライン at roof_ceiling_y(slope_coord) ===
+                for fc in face_coords:
+                    # fc = slope_axis座標（eave壁のface_coordはslope_axis上の値）
+                    ceil_y = roof_ceiling_y(fc)
+                    cut_y = min(ceil_y, info["top_y"]) - 0.02
+                    if cut_y < EAVE_HEIGHT - 0.2:
+                        continue
 
-            if wall_seg_total > 0:
-                total_by_floor["2F"] += wall_seg_total
-                print(f"    {c:8s} {n:15s} Z方向(桁) {len(face_coords)}面 → {wall_seg_total:.2f}m")
+                    # 壁の長さ: ridge_axis方向のフル範囲
+                    wall_range = get_wall_full_range(info, direction)
+                    seg_len = abs(wall_range[1] - wall_range[0])
+                    if seg_len < 0.05:
+                        continue
+
+                    side = slope_side_at(fc, face_coords)
+                    mt = "廻り縁２" if side == "上側" else "廻り縁３"
+                    wall_seg_total += seg_len
+                    total_by_type[mt] += seg_len
+
+                    p1, p2 = make_segment_along_direction(
+                        direction, fc, wall_range[0], wall_range[1], cut_y)
+                    molding_lines.append({
+                        "floor": "2F", "type": "wall", "cat": cat,
+                        "molding_type": mt, "slope_side": side,
+                        "seg": [[round(p1[0], 4), round(p1[1], 4), round(p1[2], 4)],
+                                [round(p2[0], 4), round(p2[1], 4), round(p2[2], 4)]],
+                        "length_m": round(seg_len, 4),
+                    })
+
+                dir_label = f"{direction.upper()}方向(水平/eave)"
+                print(f"    {cat:8s} {ename:15s} {dir_label} {len(face_coords)}面 → {wall_seg_total:.2f}m")
+
+            elif direction == SLOPE_AXIS:
+                # === gable壁（棟と垂直）: 勾配天井に沿った斜めライン ===
+                # 壁のslope_axis方向範囲
+                wall_range = get_wall_full_range(info, direction)
+                slope_min, slope_max = wall_range
+
+                for fc in face_coords:
+                    # fc = ridge_axis座標（gable壁のface_coordはridge_axis上の値）
+                    # slope_axis方向に勾配ラインを生成
+                    slope_segments = []
+                    if slope_min < RIDGE_POS and slope_max > RIDGE_POS:
+                        slope_segments.append((slope_min, RIDGE_POS))
+                        slope_segments.append((RIDGE_POS, slope_max))
+                    else:
+                        slope_segments.append((slope_min, slope_max))
+
+                    for ss, se in slope_segments:
+                        y_s = min(roof_ceiling_y(ss), info["top_y"]) - 0.02
+                        y_e = min(roof_ceiling_y(se), info["top_y"]) - 0.02
+                        if y_s < EAVE_HEIGHT - 0.2 and y_e < EAVE_HEIGHT - 0.2:
+                            continue
+                        seg_len = np.sqrt((se - ss)**2 + (y_e - y_s)**2)
+                        if seg_len < 0.05:
+                            continue
+                        mt = "廻り縁１"
+                        wall_seg_total += seg_len
+                        total_by_type[mt] += seg_len
+
+                        # セグメント: slope_axis方向 + Y変化
+                        if SLOPE_AXIS == "x":
+                            seg = [[round(ss, 4), round(y_s, 4), round(fc, 4)],
+                                   [round(se, 4), round(y_e, 4), round(fc, 4)]]
+                        else:
+                            seg = [[round(fc, 4), round(y_s, 4), round(ss, 4)],
+                                   [round(fc, 4), round(y_e, 4), round(se, 4)]]
+
+                        molding_lines.append({
+                            "floor": "2F", "type": "wall", "cat": cat,
+                            "molding_type": mt,
+                            "seg": seg,
+                            "length_m": round(seg_len, 4),
+                        })
+
+                dir_label = f"{direction.upper()}方向(勾配/gable)"
+                print(f"    {cat:8s} {ename:15s} {dir_label} {len(face_coords)}面 → {wall_seg_total:.2f}m")
+
+            total_by_floor["2F"] += wall_seg_total
+
+        # --- 2F桁レベル壁の廻り縁（軒側外壁: 桁で止まるeave方向壁） ---
+        keta_walls_raw = []
+        for c, g, n, inf, vf, ff in wall_data:
+            if c != "ログ壁":
+                continue
+            if inf["direction"] != RIDGE_AXIS:
+                continue
+            if inf["top_y"] < ceiling_2f - 0.1 and inf["top_y"] > EAVE_HEIGHT + 0.1:
+                keta_walls_raw.append((c, g, n, inf, vf, ff))
+
+        if keta_walls_raw:
+            print(f"\n  2F桁レベル壁（軒側）: {len(keta_walls_raw)}壁")
+            for c, g, n, inf, vf, ff in keta_walls_raw:
+                face_coords = inf["face_coords"]
+                wall_seg_total = 0
+
+                for fc in face_coords:
+                    # fc = slope_axis座標
+                    ceil_y = roof_ceiling_y(fc)
+                    if ceil_y <= EAVE_HEIGHT + 0.01:
+                        continue
+                    cut_y = min(ceil_y, inf["top_y"]) - 0.02
+                    if cut_y < 2.0:
+                        continue
+                    wall_range = get_wall_full_range(inf, RIDGE_AXIS)
+                    seg_len = abs(wall_range[1] - wall_range[0])
+                    if seg_len < 0.05:
+                        continue
+                    side = slope_side_at(fc, face_coords)
+                    mt = "廻り縁２" if side == "上側" else "廻り縁３"
+                    wall_seg_total += seg_len
+                    total_by_type[mt] += seg_len
+
+                    p1, p2 = make_segment_along_direction(
+                        RIDGE_AXIS, fc, wall_range[0], wall_range[1], cut_y)
+                    molding_lines.append({
+                        "floor": "2F", "type": "wall", "cat": c,
+                        "molding_type": mt, "slope_side": side,
+                        "seg": [[round(p1[0], 4), round(p1[1], 4), round(p1[2], 4)],
+                                [round(p2[0], 4), round(p2[1], 4), round(p2[2], 4)]],
+                        "length_m": round(seg_len, 4),
+                    })
+
+                if wall_seg_total > 0:
+                    total_by_floor["2F"] += wall_seg_total
+                    print(f"    {c:8s} {n:15s} {RIDGE_AXIS.upper()}方向(桁)"
+                          f" {len(face_coords)}面 → {wall_seg_total:.2f}m")
+    else:
+        print(f"\n  2F天井: スキップ（ceiling_2f未検出）")
 
     # --- 集成梁の廻り縁 ---
-    # (A) 屋根と接する梁（max_y > 3.5）: L300棟木など → 屋根勾配に沿った廻り縁
-    # (B) 2F床梁（1F天井レベルを跨ぐ梁）: L345など → 1F天井レベルの廻り縁
     print(f"\n  集成梁の廻り縁:")
     for beam in ifc.by_type("IfcBeam"):
         bname = beam.Name or ""
@@ -774,94 +1037,113 @@ def main():
             max_y = pts[:, 1].max()
             dx = pts[:, 0].max() - pts[:, 0].min()
             dz = pts[:, 2].max() - pts[:, 2].min()
+            beam_dir = "x" if dx > dz else "z"
             beam_seg_total = 0
 
             # (A) 屋根レベルの梁（棟木 L300 など）
-            if max_y > 3.5:
-                if dz > dx:
-                    # Z方向の梁（棟木など）: 両側面に水平ライン
-                    z_min_b = float(pts[:, 2].min())
-                    z_max_b = float(pts[:, 2].max())
-                    x_face_min = float(np.round(pts[:, 0].min(), 3))
-                    x_face_max = float(np.round(pts[:, 0].max(), 3))
+            roof_beam_threshold = EAVE_HEIGHT + 0.2 if EAVE_HEIGHT else 3.5
+            if max_y > roof_beam_threshold:
+                if beam_dir == RIDGE_AXIS:
+                    # 梁がridge_axis方向（棟木など）: 両側面に水平ライン
+                    ridge_range = (float(pts[:, 0].min()), float(pts[:, 0].max())) \
+                        if RIDGE_AXIS == "x" else (float(pts[:, 2].min()), float(pts[:, 2].max()))
+                    # 両side面のslope_axis座標
+                    if SLOPE_AXIS == "x":
+                        face_min = float(np.round(pts[:, 0].min(), 3))
+                        face_max = float(np.round(pts[:, 0].max(), 3))
+                    else:
+                        face_min = float(np.round(pts[:, 2].min(), 3))
+                        face_max = float(np.round(pts[:, 2].max(), 3))
 
-                    for x_face in [x_face_min, x_face_max]:
-                        ceil_y = roof_ceiling_y(x_face) - 0.02
-                        seg_len = abs(z_max_b - z_min_b)
+                    for fc_slope in [face_min, face_max]:
+                        ceil_y = roof_ceiling_y(fc_slope) - 0.02
+                        seg_len = abs(ridge_range[1] - ridge_range[0])
                         if seg_len < 0.05:
                             continue
-                        # 棟木 → 廻り縁２
                         mt = "廻り縁２"
                         beam_seg_total += seg_len
                         total_by_type[mt] += seg_len
+
+                        p1, p2 = make_segment_along_direction(
+                            RIDGE_AXIS, fc_slope, ridge_range[0], ridge_range[1], ceil_y)
                         molding_lines.append({
                             "floor": "2F", "type": "beam", "cat": "梁",
                             "molding_type": mt, "beam_name": bname,
-                            "seg": [[round(x_face, 4), round(ceil_y, 4), round(z_min_b, 4)],
-                                    [round(x_face, 4), round(ceil_y, 4), round(z_max_b, 4)]],
+                            "seg": [[round(p1[0], 4), round(p1[1], 4), round(p1[2], 4)],
+                                    [round(p2[0], 4), round(p2[1], 4), round(p2[2], 4)]],
                             "length_m": round(seg_len, 4),
                         })
 
-                    print(f"    [屋根] 梁 {bname:15s} Z方向 X=[{x_face_min:.3f},{x_face_max:.3f}]"
+                    print(f"    [屋根] 梁 {bname:15s} {RIDGE_AXIS.upper()}方向"
                           f" 両面 → {beam_seg_total:.2f}m")
 
                 else:
-                    # X方向の梁: 両側面に勾配ライン
-                    x_min_b = float(pts[:, 0].min())
-                    x_max_b = float(pts[:, 0].max())
-                    z_face_min = float(np.round(pts[:, 2].min(), 3))
-                    z_face_max = float(np.round(pts[:, 2].max(), 3))
+                    # 梁がslope_axis方向: 両側面に勾配ライン
+                    slope_range = (float(pts[:, 0].min()), float(pts[:, 0].max())) \
+                        if SLOPE_AXIS == "x" else (float(pts[:, 2].min()), float(pts[:, 2].max()))
+                    # 両side面のridge_axis座標
+                    if RIDGE_AXIS == "x":
+                        face_min = float(np.round(pts[:, 0].min(), 3))
+                        face_max = float(np.round(pts[:, 0].max(), 3))
+                    else:
+                        face_min = float(np.round(pts[:, 2].min(), 3))
+                        face_max = float(np.round(pts[:, 2].max(), 3))
 
-                    for z_face in [z_face_min, z_face_max]:
-                        x_segments = []
-                        if x_min_b < RIDGE_X and x_max_b > RIDGE_X:
-                            x_segments.append((x_min_b, RIDGE_X))
-                            x_segments.append((RIDGE_X, x_max_b))
+                    for fc_ridge in [face_min, face_max]:
+                        slope_segs = []
+                        if slope_range[0] < RIDGE_POS and slope_range[1] > RIDGE_POS:
+                            slope_segs.append((slope_range[0], RIDGE_POS))
+                            slope_segs.append((RIDGE_POS, slope_range[1]))
                         else:
-                            x_segments.append((x_min_b, x_max_b))
+                            slope_segs.append((slope_range[0], slope_range[1]))
 
-                        for xs, xe in x_segments:
-                            y_s = roof_ceiling_y(xs) - 0.02
-                            y_e = roof_ceiling_y(xe) - 0.02
-                            seg_len = np.sqrt((xe - xs)**2 + (y_e - y_s)**2)
+                        for ss, se in slope_segs:
+                            y_s = roof_ceiling_y(ss) - 0.02
+                            y_e = roof_ceiling_y(se) - 0.02
+                            seg_len = np.sqrt((se - ss)**2 + (y_e - y_s)**2)
                             if seg_len < 0.05:
                                 continue
-                            # 屋根レベルX方向梁の勾配ライン → 廻り縁２（棟木扱い）
                             mt = "廻り縁２"
                             beam_seg_total += seg_len
                             total_by_type[mt] += seg_len
+
+                            if SLOPE_AXIS == "x":
+                                seg = [[round(ss, 4), round(y_s, 4), round(fc_ridge, 4)],
+                                       [round(se, 4), round(y_e, 4), round(fc_ridge, 4)]]
+                            else:
+                                seg = [[round(fc_ridge, 4), round(y_s, 4), round(ss, 4)],
+                                       [round(fc_ridge, 4), round(y_e, 4), round(se, 4)]]
+
                             molding_lines.append({
                                 "floor": "2F", "type": "beam", "cat": "梁",
                                 "molding_type": mt, "beam_name": bname,
-                                "seg": [[round(xs, 4), round(y_s, 4), round(z_face, 4)],
-                                        [round(xe, 4), round(y_e, 4), round(z_face, 4)]],
+                                "seg": seg,
                                 "length_m": round(seg_len, 4),
                             })
 
-                    print(f"    [屋根] 梁 {bname:15s} X方向 両面 → {beam_seg_total:.2f}m")
+                    print(f"    [屋根] 梁 {bname:15s} {SLOPE_AXIS.upper()}方向"
+                          f" 両面 → {beam_seg_total:.2f}m")
 
                 total_by_floor["2F"] += beam_seg_total
 
             # (B) 2F床梁（1F天井レベルを跨ぐ梁 = min_y < ceiling_1f < max_y）
-            elif min_y < ceiling_1f and max_y > ceiling_1f:
+            elif not is_single_story and ceiling_1f and min_y < ceiling_1f and max_y > ceiling_1f:
                 beam_1f_total = 0
-                if dz > dx:
-                    # Z方向の梁: 両X面に1F天井レベルの水平ライン
+                cs_y_1f = ceiling_1f - 0.02
+
+                if beam_dir == "z":
                     z_min_b = float(pts[:, 2].min())
                     z_max_b = float(pts[:, 2].max())
                     x_face_min = float(np.round(pts[:, 0].min(), 3))
                     x_face_max = float(np.round(pts[:, 0].max(), 3))
-
                     for x_face in [x_face_min, x_face_max]:
                         p1 = [x_face, cs_y_1f, z_min_b]
                         p2 = [x_face, cs_y_1f, z_max_b]
-                        # 1Fスラブクリッピング（天井がある範囲のみ）
                         clipped = clip_segment_to_slab(p1, p2, slab_tris_1f_ceiling, "z")
                         for sp1, sp2 in clipped:
                             seg_len = np.sqrt(sum((a - b) ** 2 for a, b in zip(sp1, sp2)))
                             if seg_len < 0.05:
                                 continue
-                            # 1F × 梁 → 廻り縁１
                             mt = "廻り縁１"
                             beam_1f_total += seg_len
                             total_by_type[mt] += seg_len
@@ -872,17 +1154,12 @@ def main():
                                         [round(sp2[0], 4), round(sp2[1], 4), round(sp2[2], 4)]],
                                 "length_m": round(seg_len, 4),
                             })
-
-                    print(f"    [1F床] 梁 {bname:15s} Z方向 X=[{x_face_min:.3f},{x_face_max:.3f}]"
-                          f" 両面 → {beam_1f_total:.2f}m")
-
+                    print(f"    [1F床] 梁 {bname:15s} Z方向 → {beam_1f_total:.2f}m")
                 else:
-                    # X方向の梁: 両Z面に1F天井レベルの水平ライン
                     x_min_b = float(pts[:, 0].min())
                     x_max_b = float(pts[:, 0].max())
                     z_face_min = float(np.round(pts[:, 2].min(), 3))
                     z_face_max = float(np.round(pts[:, 2].max(), 3))
-
                     for z_face in [z_face_min, z_face_max]:
                         p1 = [x_min_b, cs_y_1f, z_face]
                         p2 = [x_max_b, cs_y_1f, z_face]
@@ -891,7 +1168,6 @@ def main():
                             seg_len = np.sqrt(sum((a - b) ** 2 for a, b in zip(sp1, sp2)))
                             if seg_len < 0.05:
                                 continue
-                            # 1F × 梁 → 廻り縁１
                             mt = "廻り縁１"
                             beam_1f_total += seg_len
                             total_by_type[mt] += seg_len
@@ -902,8 +1178,7 @@ def main():
                                         [round(sp2[0], 4), round(sp2[1], 4), round(sp2[2], 4)]],
                                 "length_m": round(seg_len, 4),
                             })
-
-                    print(f"    [1F床] 梁 {bname:15s} X方向 両面 → {beam_1f_total:.2f}m")
+                    print(f"    [1F床] 梁 {bname:15s} X方向 → {beam_1f_total:.2f}m")
 
                 total_by_floor["1F"] += beam_1f_total
 
@@ -947,6 +1222,9 @@ def main():
         print(f"  {key}: {detail[key]:.2f}m")
 
     # === HTML出力 ===
+    # IFCファイル名を取得してタイトルに使用
+    ifc_basename = os.path.splitext(os.path.basename(IFC_PATH))[0]
+
     meshes_json = json.dumps(meshes, ensure_ascii=False)
     molding_json = json.dumps(molding_lines, ensure_ascii=False)
     colors_json = json.dumps(CATEGORY_COLORS, ensure_ascii=False)
@@ -962,19 +1240,21 @@ def main():
 
     totals_json = json.dumps(totals_data, ensure_ascii=False)
     type_totals_json = json.dumps(type_totals, ensure_ascii=False)
-    html = generate_html(meshes_json, molding_json, colors_json, totals_json, type_totals_json)
+    html = generate_html(meshes_json, molding_json, colors_json,
+                         totals_json, type_totals_json, ifc_basename)
 
     with open(OUTPUT_HTML, 'w', encoding='utf-8') as f:
         f.write(html)
     print(f"\n出力: {OUTPUT_HTML}")
 
 
-def generate_html(meshes_json, molding_json, colors_json, totals_json, type_totals_json):
+def generate_html(meshes_json, molding_json, colors_json,
+                  totals_json, type_totals_json, title="廻り縁拾い"):
     return f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>廻り縁拾い 3Dビューア - ie4d1</title>
+<title>廻り縁拾い 3Dビューア - {title}</title>
 <style>
 * {{ margin:0; padding:0; box-sizing:border-box; }}
 body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
@@ -997,7 +1277,7 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 </head>
 <body>
 <div id="info">
-  <h3>廻り縁拾い 3Dビューア</h3>
+  <h3>廻り縁拾い 3Dビューア - {title}</h3>
   <div>左ドラッグ: 回転 / 右ドラッグ: 移動 / ホイール: ズーム</div>
   <div id="sel-info" style="margin-top:6px;color:#aaa;">クリックで部材選択</div>
 </div>
@@ -1019,11 +1299,10 @@ const COLORS={colors_json};
 const TOTALS={totals_json};
 const TYPE_TOTALS={type_totals_json};
 
-// 廻り縁タイプ別カラー
 const MOLDING_TYPE_COLORS = {{
-  "廻り縁１": 0xff6644,  // オレンジレッド
-  "廻り縁２": 0x44ccff,  // 水色
-  "廻り縁３": 0x88ff44   // ライムグリーン
+  "廻り縁１": 0xff6644,
+  "廻り縁２": 0x44ccff,
+  "廻り縁３": 0x88ff44
 }};
 const MOLDING_TYPE_CSS = {{
   "廻り縁１": "#ff6644",
@@ -1080,7 +1359,6 @@ catGroups[m.cat].add(mesh);allMeshes.push(mesh);bbox.expandByObject(mesh);
 }});
 scene.add(buildingGroup);
 
-// 廻り縁タイプ別グループ
 const moldingGroups = {{}};
 ["廻り縁１","廻り縁２","廻り縁３"].forEach(mt=>{{moldingGroups[mt]=new THREE.Group();scene.add(moldingGroups[mt]);}});
 
@@ -1094,7 +1372,6 @@ const grp=moldingGroups[mt];
 if(grp) grp.add(new THREE.Line(g,mat));
 }});
 
-// 集計表示: 部材種別ごと
 let infoHtml='<b style="font-size:14px;">廻り縁集計（部材種別）</b><br><br>';
 let grandTotal=0;
 for(const mt of ["廻り縁１","廻り縁２","廻り縁３"]){{
@@ -1104,7 +1381,6 @@ for(const mt of ["廻り縁１","廻り縁２","廻り縁３"]){{
   infoHtml+=`<span style="color:${{cc}}">━━ ${{mt}}: ${{t.toFixed(2)}}m</span><br>`;
 }}
 infoHtml+=`<br>`;
-// 階別サブ集計
 for(const [fn,t] of Object.entries(TOTALS)){{
   infoHtml+=`<span style="color:#aaa">${{fn}}天井: ${{t.toFixed(2)}}m</span><br>`;
 }}
@@ -1122,7 +1398,6 @@ camera.position.set(center.x+maxDim*0.8,center.y+maxDim*0.6,center.z+maxDim*0.8)
 controls.t.copy(center);camera.lookAt(center);}}
 
 const leg=document.getElementById('legend');
-// 廻り縁タイプ凡例
 ["廻り縁１","廻り縁２","廻り縁３"].forEach(mt=>{{
 const cc=MOLDING_TYPE_CSS[mt]||"#fff";
 const t=TYPE_TOTALS[mt]||0;
@@ -1131,9 +1406,7 @@ d.innerHTML='<span class="cb" style="background:'+cc+'"></span>'+mt+' ('+t.toFix
 d.style.fontWeight='bold';
 leg.appendChild(d);
 }});
-// 区切り線
 const sep=document.createElement('div');sep.style.borderTop='1px solid rgba(255,255,255,0.3)';sep.style.margin='6px 0';leg.appendChild(sep);
-// 建物カテゴリ凡例
 [...new Set(MESHES.map(m=>m.cat))].forEach(cat=>{{
 const d=document.createElement('div');d.innerHTML='<span class="cb" style="background:'+(COLORS[cat]||'#999')+'"></span>'+cat;
 d.onclick=()=>{{if(catGroups[cat]){{catGroups[cat].visible=!catGroups[cat].visible;d.style.opacity=catGroups[cat].visible?1:0.3;}}}};
