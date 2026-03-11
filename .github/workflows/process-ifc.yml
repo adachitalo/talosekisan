@@ -6,10 +6,11 @@ on:
       - '*.ifc'
       - 'ifc/**'
       - 'pages/**'
+      - 'scripts/**'
   workflow_dispatch:
     inputs:
       ifc_file:
-        description: 'IFCファイル名（例: ie4d1_2023.ifc）'
+        description: 'IFCファイル名（例: ifc/ie4d1_2023.ifc）空=全ファイル再生成'
         required: false
         default: ''
 
@@ -20,7 +21,7 @@ permissions:
 
 concurrency:
   group: "pages"
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -28,36 +29,75 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
 
-      - name: Find IFC files
+      - name: Restore cached HTML outputs
+        id: cache-html
+        uses: actions/cache@v4
+        with:
+          path: output-cache
+          key: ifc-html-${{ hashFiles('scripts/build_mawari_buchi_viewer.py') }}-${{ hashFiles('ifc/*.ifc', '*.ifc') }}
+          restore-keys: |
+            ifc-html-${{ hashFiles('scripts/build_mawari_buchi_viewer.py') }}-
+            ifc-html-
+
+      - name: Determine which IFC files to process
         id: find-ifc
         run: |
+          mkdir -p output-cache
+
+          # workflow_dispatch で指定された場合
           if [ -n "${{ github.event.inputs.ifc_file }}" ]; then
             echo "files=${{ github.event.inputs.ifc_file }}" >> $GITHUB_OUTPUT
-          else
+            echo "mode=specified" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # スクリプト変更時は全ファイル再生成
+          SCRIPT_CHANGED=$(git diff --name-only HEAD~1 HEAD -- scripts/ 2>/dev/null || echo "")
+          if [ -n "$SCRIPT_CHANGED" ]; then
             FILES=$(find . -name '*.ifc' -not -path './.git/*' | tr '\n' ' ')
             echo "files=$FILES" >> $GITHUB_OUTPUT
+            echo "mode=all (script changed)" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # 変更されたIFCファイルのみ
+          CHANGED_IFC=$(git diff --name-only HEAD~1 HEAD -- '*.ifc' 'ifc/*.ifc' 2>/dev/null || echo "")
+          if [ -n "$CHANGED_IFC" ]; then
+            echo "files=$CHANGED_IFC" >> $GITHUB_OUTPUT
+            echo "mode=changed only" >> $GITHUB_OUTPUT
+          else
+            # pages/ のみの変更 → IFC処理不要、既存キャッシュ利用
+            echo "files=" >> $GITHUB_OUTPUT
+            echo "mode=pages-only (no IFC processing)" >> $GITHUB_OUTPUT
           fi
 
       - name: Process IFC files
         run: |
           mkdir -p output
+          echo "Processing mode: ${{ steps.find-ifc.outputs.mode }}"
+
+          # キャッシュから既存HTMLを復元
+          if [ -d output-cache ]; then
+            cp output-cache/*.html output/ 2>/dev/null || true
+            echo "Restored $(ls output/*.html 2>/dev/null | wc -l) cached HTML files"
+          fi
+
           IFC_FILES="${{ steps.find-ifc.outputs.files }}"
 
-          if [ -z "$IFC_FILES" ]; then
-            echo "::warning::IFCファイルが見つかりません（静的ページのみデプロイ）"
-          else
-            INDEX_LINKS=""
-
+          if [ -n "$IFC_FILES" ]; then
             for ifc in $IFC_FILES; do
               if [ ! -f "$ifc" ]; then
                 echo "::warning::ファイルが見つかりません: $ifc"
@@ -69,10 +109,24 @@ jobs:
 
               echo "=== Processing: $ifc → $OUTPUT ==="
               python scripts/build_mawari_buchi_viewer.py "$ifc" "$OUTPUT"
-
-              INDEX_LINKS="${INDEX_LINKS}<li><a href='${BASENAME}.html'>${BASENAME}</a></li>"
             done
+          else
+            echo "No IFC files to process (using cached outputs)"
           fi
+
+          # 処理結果をキャッシュに保存
+          mkdir -p output-cache
+          cp output/*.html output-cache/ 2>/dev/null || true
+
+          # インデックスリンクを生成（outputにある全HTMLから）
+          INDEX_LINKS=""
+          for html in output/*.html; do
+            [ -f "$html" ] || continue
+            BASENAME=$(basename "$html" .html)
+            [ "$BASENAME" = "index" ] && continue
+            [ "$BASENAME" = "upload" ] && continue
+            INDEX_LINKS="${INDEX_LINKS}<li><a href='${BASENAME}.html'>${BASENAME}</a></li>"
+          done
 
           # アップロードページをコピー
           if [ -f "pages/upload.html" ]; then
