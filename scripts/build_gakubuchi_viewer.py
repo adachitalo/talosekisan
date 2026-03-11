@@ -49,6 +49,8 @@ FRAME_RULES = {
              "front_extras": ["T-bar", "木口"]},
     "JD":   {"front_frame": "3", "back_frame": "3",
              "front_extras": ["木口"]},
+    "SL":   {"front_frame": "4", "back_frame": None,
+             "front_extras": []},
 }
 
 # ============================================================================
@@ -62,6 +64,7 @@ DIMENSION_OFFSETS = {
     "NVs":  (0, 0),
     "NW":   (340, 106),
     "JD":   (0, 0),
+    "SL":   (0, 0),
 }
 
 NW_SMALL_W_OFFSET = 280  # NW小型ドア(W<800)用
@@ -129,6 +132,10 @@ def classify_fixture_type(name: str, typedef: str) -> str:
     # open_ad: 開放部（建具リーフなし）
     if td == "OPEN_AD" or (nm.startswith("OPEN") and "DOOR" not in td):
         return None
+
+    # --- 天窓(スカイライト) ---
+    if "スカイライト" in typedef or "SKYLIGHT" in td or nm.startswith("SL"):
+        return "SL"
 
     if "VMSD" in td or "PSD" in td:
         return "VMSD"
@@ -229,7 +236,9 @@ def generate_frame_pieces(ftype: str, w_mm: float, h_mm: float, wall_type: str =
             pieces.append(("木口", "右", h_mm, "front"))
 
     # --- 裏面(back) ---
-    if rule["back_frame"] == "4":
+    if rule["back_frame"] is None:
+        pass  # 天窓等: 片面のみ
+    elif rule["back_frame"] == "4":
         pieces.append(("額縁", "上", w_mm + 300, "back"))
         pieces.append(("額縁", "左", h_mm + 170, "back"))
         pieces.append(("額縁", "右", h_mm + 170, "back"))
@@ -308,6 +317,67 @@ def extract_meshes(ifc_file):
 # ============================================================================
 # IFC解析 – 建具検出と額縁ライン生成
 # ============================================================================
+def get_skylight_placement(element):
+    """天窓のワールド座標中心と勾配に沿った方向ベクトルを取得。
+    IFC配置行列のheight_dirは垂直[0,0,1]で勾配を反映しないため、
+    メッシュ頂点から実際の勾配方向を算出する。
+    Returns: (center, width_dir, height_dir, depth_dir) すべてIFC座標系
+    """
+    settings_w = ifcopenshell.geom.settings()
+    settings_w.set(settings_w.USE_WORLD_COORDS, True)
+    shape_w = ifcopenshell.geom.create_shape(settings_w, element)
+    vf = shape_w.geometry.verts
+
+    pts = np.array([[vf[i], vf[i+1], vf[i+2]]
+                     for i in range(0, len(vf), 3)])
+
+    center = np.array([
+        (pts[:, 0].min() + pts[:, 0].max()) / 2,
+        (pts[:, 1].min() + pts[:, 1].max()) / 2,
+        (pts[:, 2].min() + pts[:, 2].max()) / 2
+    ])
+
+    # 配置行列からwidth_dir（幅方向=Y軸方向、正しい）を取得
+    settings_l = ifcopenshell.geom.settings()
+    settings_l.set(settings_l.USE_WORLD_COORDS, False)
+    shape_l = ifcopenshell.geom.create_shape(settings_l, element)
+    mat = list(shape_l.transformation.matrix)
+    m44 = np.array(mat).reshape(4, 4).T
+    width_dir = m44[:3, 0]
+    width_dir = width_dir / (np.linalg.norm(width_dir) + 1e-12)
+
+    # 勾配方向(height_dir): メッシュのバウンディングボックス対角線から算出
+    # width方向成分を除去し、残りのXZ平面で勾配方向を求める
+    proj = pts - center
+    w_comp = np.dot(proj, width_dir).reshape(-1, 1) * width_dir
+    perp = proj - w_comp
+
+    # XZ平面のバウンディングボックス対角線 = 勾配方向
+    x_min, x_max = perp[:, 0].min(), perp[:, 0].max()
+    z_min, z_max = perp[:, 2].min(), perp[:, 2].max()
+    # 下端中心から上端中心への方向ベクトル
+    # (低Z側→高Z側, 対応するX方向も考慮)
+    low_z_mask = perp[:, 2] < (z_min + (z_max - z_min) * 0.2)
+    high_z_mask = perp[:, 2] > (z_max - (z_max - z_min) * 0.2)
+    low_center = perp[low_z_mask].mean(axis=0) if low_z_mask.any() else np.array([x_min, 0, z_min])
+    high_center = perp[high_z_mask].mean(axis=0) if high_z_mask.any() else np.array([x_max, 0, z_max])
+    slope_vec = high_center - low_center
+    slope_norm = np.linalg.norm(slope_vec)
+    if slope_norm > 1e-6:
+        height_dir = slope_vec / slope_norm
+    else:
+        height_dir = np.array([0, 0, 1])
+    # Z成分が正（上向き勾配）になるよう統一
+    if height_dir[2] < 0:
+        height_dir = -height_dir
+
+    # depth_dir: width × height の外積（屋根面の法線方向）
+    depth_dir = np.cross(width_dir, height_dir)
+    depth_dir = depth_dir / (np.linalg.norm(depth_dir) + 1e-12)
+
+    return center, width_dir, height_dir, depth_dir
+
+
 def get_element_placement_and_center(element):
     """建具のワールド座標中心と方向ベクトルを取得。
     Returns: (center, width_dir, height_dir, depth_dir) すべてIFC座標系
@@ -380,8 +450,12 @@ def detect_fixtures_and_frames(ifc_file):
             frame_w, frame_h = get_frame_dimensions(ftype, ifc_w, ifc_h, wall_type)
 
             try:
-                center, width_dir, height_dir, depth_dir = \
-                    get_element_placement_and_center(element)
+                if ftype == "SL":
+                    center, width_dir, height_dir, depth_dir = \
+                        get_skylight_placement(element)
+                else:
+                    center, width_dir, height_dir, depth_dir = \
+                        get_element_placement_and_center(element)
             except Exception:
                 continue
 
