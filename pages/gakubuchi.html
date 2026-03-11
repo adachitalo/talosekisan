@@ -420,8 +420,8 @@ function renderSelected() {
         <strong>${esc(s.p)}</strong>
         <span style="color:var(--muted);font-size:11px">${s.h}×${s.w}</span>
         <span style="margin-left:auto;display:flex;align-items:center;gap:4px">
-          <input type="number" min="1" value="${s.qty}" style="width:45px" onchange="selectedItems[${i}].qty=parseInt(this.value)||1;renderSelected()">
           ${s.qty > 1 ? `<button class="btn btn-sm" style="font-size:10px;padding:2px 6px;background:#f59e0b;color:#fff;border-color:#f59e0b" onclick="splitItem(${i})" title="1本を分割して個別設定可能にする">分割</button>` : ''}
+          <input type="number" min="1" value="${s.qty}" style="width:45px" onchange="selectedItems[${i}].qty=parseInt(this.value)||1;renderSelected()">
           <button class="btn btn-sm" onclick="removeItem(${i})">×</button>
         </span>
       </div>
