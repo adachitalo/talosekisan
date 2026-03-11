@@ -218,7 +218,7 @@ h1 {
 <body>
 
 <h1>TALO 積算ツール</h1>
-<p class="subtitle">IFCファイルをドラッグ＆ドロップして廻り縁拾い3Dビューアを生成</p>
+<p class="subtitle">IFCファイルをドラッグ＆ドロップして廻り縁・巾木・部材一覧Excelを自動生成</p>
 
 <!-- Token setup -->
 <details class="token-section" id="tokenSection">
@@ -255,7 +255,7 @@ h1 {
 
 <!-- Existing viewers -->
 <div class="viewers-section" id="viewersSection" style="display:none;">
-  <h2>生成済みビューア</h2>
+  <h2>生成済みモデル</h2>
   <div id="viewersList"></div>
 </div>
 
@@ -471,38 +471,19 @@ async function loadExistingViewers() {
       for (const f of ifcFiles) {
         const baseName = f.name.replace('.ifc', '');
         const sizeMB = (f.size / 1024 / 1024).toFixed(1);
-        const a = document.createElement('a');
-        a.className = 'viewer-link';
-        a.href = `${baseUrl}/${baseName}.html`;
-        a.target = '_blank';
-        a.innerHTML = `📊 ${baseName} <span class="size">(${sizeMB} MB)</span>`;
-        list.appendChild(a);
+        const div = document.createElement('div');
+        div.className = 'viewer-link';
+        div.innerHTML = `<strong>${baseName}</strong> <span class="size">(${sizeMB} MB)</span><br>
+          <span style="font-size:13px;">
+            <a href="${baseUrl}/mawari_${baseName}.html" target="_blank">廻り縁</a> |
+            <a href="${baseUrl}/habaki_${baseName}.html" target="_blank">巾木</a> |
+            <a href="${baseUrl}/buzai_${baseName}.xlsx" target="_blank">📊 Excel</a>
+          </span>`;
+        list.appendChild(div);
       }
       section.style.display = 'block';
     } else {
-      // No ifc folder yet - check root for .ifc files
-      const rootRes = await fetch(`${API_BASE}/contents/?ref=${BRANCH}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (rootRes.ok) {
-        const rootFiles = await rootRes.json();
-        const ifcFiles = rootFiles.filter(f => f.name.endsWith('.ifc'));
-        if (ifcFiles.length > 0) {
-          list.innerHTML = '';
-          const baseUrl = `https://${REPO_OWNER}.github.io/${REPO_NAME}`;
-          for (const f of ifcFiles) {
-            const baseName = f.name.replace('.ifc', '');
-            const sizeMB = (f.size / 1024 / 1024).toFixed(1);
-            const a = document.createElement('a');
-            a.className = 'viewer-link';
-            a.href = `${baseUrl}/${baseName}.html`;
-            a.target = '_blank';
-            a.innerHTML = `📊 ${baseName} <span class="size">(${sizeMB} MB)</span>`;
-            list.appendChild(a);
-          }
-          section.style.display = 'block';
-        }
-      }
+      section.style.display = 'none';
     }
   } catch (e) {
     console.warn('Failed to load viewers:', e);
@@ -527,9 +508,13 @@ function addResult(fileName, baseName) {
     <div class="icon">✅</div>
     <div class="info">
       <div class="name">${fileName}</div>
-      <div class="detail">3Dビューアを生成しました</div>
+      <div class="detail">廻り縁・巾木・部材一覧Excelを生成しました</div>
     </div>
-    <a href="${baseUrl}/${baseName}.html" target="_blank">ビューアを開く →</a>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <a href="${baseUrl}/mawari_${baseName}.html" target="_blank">廻り縁 →</a>
+      <a href="${baseUrl}/habaki_${baseName}.html" target="_blank">巾木 →</a>
+      <a href="${baseUrl}/buzai_${baseName}.xlsx" target="_blank">Excel →</a>
+    </div>
   `;
   document.getElementById('results').prepend(div);
 }

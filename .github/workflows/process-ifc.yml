@@ -1,4 +1,4 @@
-name: IFC → 廻り縁拾い3Dビューア
+name: IFC → 積算ツール（廻り縁・巾木・部材一覧Excel）
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
       - 'ifc/**'
       - 'pages/**'
       - 'scripts/**'
+      - 'requirements.txt'
   workflow_dispatch:
     inputs:
       ifc_file:
@@ -39,18 +40,17 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
-      - name: Restore cached HTML outputs
-        id: cache-html
+      - name: Restore cached outputs
+        id: cache-outputs
         uses: actions/cache@v4
         with:
           path: output-cache
-          key: ifc-html-${{ hashFiles('scripts/build_mawari_buchi_viewer.py') }}-${{ hashFiles('ifc/*.ifc', '*.ifc') }}
+          key: ifc-outputs-${{ hashFiles('scripts/**') }}-${{ hashFiles('ifc/*.ifc', '*.ifc') }}
           restore-keys: |
-            ifc-html-${{ hashFiles('scripts/build_mawari_buchi_viewer.py') }}-
-            ifc-html-
+            ifc-outputs-${{ hashFiles('scripts/**') }}-
+            ifc-outputs-
 
       - name: Determine which IFC files to process
         id: find-ifc
@@ -65,7 +65,7 @@ jobs:
           fi
 
           # スクリプト変更時は全ファイル再生成
-          SCRIPT_CHANGED=$(git diff --name-only HEAD~1 HEAD -- scripts/ 2>/dev/null || echo "")
+          SCRIPT_CHANGED=$(git diff --name-only HEAD~1 HEAD -- scripts/ requirements.txt 2>/dev/null || echo "")
           if [ -n "$SCRIPT_CHANGED" ]; then
             FILES=$(find . -name '*.ifc' -not -path './.git/*' | tr '\n' ' ')
             echo "files=$FILES" >> $GITHUB_OUTPUT
@@ -79,20 +79,19 @@ jobs:
             echo "files=$CHANGED_IFC" >> $GITHUB_OUTPUT
             echo "mode=changed only" >> $GITHUB_OUTPUT
           else
-            # pages/ のみの変更 → IFC処理不要、既存キャッシュ利用
             echo "files=" >> $GITHUB_OUTPUT
             echo "mode=pages-only (no IFC processing)" >> $GITHUB_OUTPUT
           fi
 
-      - name: Process IFC files
+      - name: Process IFC files (all tools)
         run: |
           mkdir -p output
           echo "Processing mode: ${{ steps.find-ifc.outputs.mode }}"
 
-          # キャッシュから既存HTMLを復元
+          # キャッシュから既存出力を復元
           if [ -d output-cache ]; then
-            cp output-cache/*.html output/ 2>/dev/null || true
-            echo "Restored $(ls output/*.html 2>/dev/null | wc -l) cached HTML files"
+            cp -r output-cache/* output/ 2>/dev/null || true
+            echo "Restored cached outputs: $(ls output/ 2>/dev/null | wc -l) files"
           fi
 
           IFC_FILES="${{ steps.find-ifc.outputs.files }}"
@@ -105,10 +104,23 @@ jobs:
               fi
 
               BASENAME=$(basename "$ifc" .ifc)
-              OUTPUT="output/${BASENAME}.html"
+              echo ""
+              echo "========================================="
+              echo "  Processing: $BASENAME"
+              echo "========================================="
 
-              echo "=== Processing: $ifc → $OUTPUT ==="
-              python scripts/build_mawari_buchi_viewer.py "$ifc" "$OUTPUT"
+              # 1. 廻り縁拾い3Dビューア
+              echo "--- 廻り縁拾い ---"
+              python scripts/build_mawari_buchi_viewer.py "$ifc" "output/mawari_${BASENAME}.html" || echo "::warning::廻り縁拾い失敗: $BASENAME"
+
+              # 2. 巾木拾い3Dビューア
+              echo "--- 巾木拾い ---"
+              python scripts/build_habaki_viewer.py "$ifc" "output/habaki_${BASENAME}.html" || echo "::warning::巾木拾い失敗: $BASENAME"
+
+              # 3. 部材一覧Excel
+              echo "--- 部材一覧Excel ---"
+              python scripts/extract_ifc.py "$ifc" "output/buzai_${BASENAME}.xlsx" || echo "::warning::部材一覧Excel失敗: $BASENAME"
+
             done
           else
             echo "No IFC files to process (using cached outputs)"
@@ -116,51 +128,70 @@ jobs:
 
           # 処理結果をキャッシュに保存
           mkdir -p output-cache
-          cp output/*.html output-cache/ 2>/dev/null || true
+          cp -r output/* output-cache/ 2>/dev/null || true
 
-          # インデックスリンクを生成（outputにある全HTMLから）
-          INDEX_LINKS=""
-          for html in output/*.html; do
-            [ -f "$html" ] || continue
-            BASENAME=$(basename "$html" .html)
-            [ "$BASENAME" = "index" ] && continue
-            [ "$BASENAME" = "upload" ] && continue
-            INDEX_LINKS="${INDEX_LINKS}<li><a href='${BASENAME}.html'>${BASENAME}</a></li>"
+      - name: Build site
+        run: |
+          # 静的ページをコピー
+          cp pages/upload.html output/upload.html 2>/dev/null || true
+          for f in pages/*.html; do
+            [ -f "$f" ] || continue
+            FNAME=$(basename "$f")
+            [ "$FNAME" = "upload.html" ] && continue
+            cp "$f" "output/$FNAME"
           done
 
-          # アップロードページをコピー
-          if [ -f "pages/upload.html" ]; then
-            cp pages/upload.html output/upload.html
-          fi
+          # IFCモデル一覧を動的に構築
+          MODEL_CARDS=""
+          for mawari in output/mawari_*.html; do
+            [ -f "$mawari" ] || continue
+            BASENAME=$(basename "$mawari" .html | sed 's/^mawari_//')
 
-          # インデックスページを生成
+            LINKS="<a href='mawari_${BASENAME}.html'>廻り縁拾い</a>"
+            if [ -f "output/habaki_${BASENAME}.html" ]; then
+              LINKS="${LINKS} | <a href='habaki_${BASENAME}.html'>巾木拾い</a>"
+            fi
+            if [ -f "output/buzai_${BASENAME}.xlsx" ]; then
+              LINKS="${LINKS} | <a href='buzai_${BASENAME}.xlsx'>📊 部材一覧Excel</a>"
+            fi
+
+            MODEL_CARDS="${MODEL_CARDS}<div class='model-card'><h3>${BASENAME}</h3><div class='links'>${LINKS}</div></div>"
+          done
+
           cat > output/index.html << 'HTMLEOF'
           <!DOCTYPE html>
           <html><head><meta charset="utf-8"><title>TALO 積算ツール</title>
           <style>
           body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Hiragino Sans",sans-serif;
-          background:#0d1117;color:#e6edf3;max-width:600px;margin:40px auto;padding:0 20px}
+          background:#0d1117;color:#e6edf3;max-width:700px;margin:40px auto;padding:0 20px}
           h1{color:#58a6ff;margin-bottom:4px}
           .sub{color:#8b949e;margin-bottom:24px;font-size:14px}
           .upload-btn{display:inline-block;background:#238636;color:#fff;text-decoration:none;
-          padding:10px 20px;border-radius:6px;font-size:15px;margin-bottom:24px}
+          padding:10px 20px;border-radius:6px;font-size:15px;margin-bottom:8px}
           .upload-btn:hover{background:#2ea043}
+          .tool-btn{display:inline-block;background:#1f6feb;color:#fff;text-decoration:none;
+          padding:10px 20px;border-radius:6px;font-size:15px;margin-bottom:24px;margin-left:8px}
+          .tool-btn:hover{background:#388bfd}
           h2{font-size:16px;color:#8b949e;border-bottom:1px solid #21262d;padding-bottom:8px;margin-top:24px}
-          a{color:#58a6ff;text-decoration:none}a:hover{text-decoration:underline}
-          li{margin:10px 0;font-size:16px}
+          .model-card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin:12px 0}
+          .model-card h3{color:#58a6ff;margin-bottom:8px;font-size:18px}
+          .model-card .links{font-size:14px}
+          .model-card a{color:#58a6ff;text-decoration:none}
+          .model-card a:hover{text-decoration:underline}
           .footer{color:#484f58;font-size:12px;margin-top:40px}
           </style></head>
           <body>
           <h1>TALO 積算ツール</h1>
-          <p class="sub">IFCファイルから廻り縁拾い3Dビューアを自動生成</p>
+          <p class="sub">IFCファイルから廻り縁拾い・巾木拾い・部材一覧Excelを自動生成</p>
           <a href="upload.html" class="upload-btn">📤 IFCファイルをアップロード</a>
-          <h2>生成済みビューア</h2>
+          <a href="額縁拾い.html" class="tool-btn">🪟 額縁拾い・木取り計算</a>
+          <h2>生成済みモデル</h2>
           HTMLEOF
 
-          if [ -n "$INDEX_LINKS" ]; then
-            echo "<ul>${INDEX_LINKS}</ul>" >> output/index.html
+          if [ -n "$MODEL_CARDS" ]; then
+            echo "$MODEL_CARDS" >> output/index.html
           else
-            echo "<p style='color:#8b949e'>まだビューアがありません。IFCファイルをアップロードしてください。</p>" >> output/index.html
+            echo "<p style='color:#8b949e'>まだモデルがありません。IFCファイルをアップロードしてください。</p>" >> output/index.html
           fi
 
           cat >> output/index.html << 'HTMLEOF'
