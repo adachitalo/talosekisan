@@ -795,6 +795,56 @@ function getDefaultTypes(marker) {
   return ['額縁4方','額縁受け','T-bar','霧除け'];
 }
 
+// ========== 規格寸法チェック ==========
+// 品番 → [w, h] の規格寸法マスタ（CAD入力ミス検出用）
+const SIZE_MASTER = {
+  'VMW-1':[450,597], 'VMW-1(FIX)':[450,597], 'VMW-1(OBS)':[450,597],
+  'VMW-2':[889,533], 'VMW-3':[533,889], 'VMW-3(FIX)':[533,889], 'VMW-3(OBS)':[533,889],
+  'VMW-3+VMW-4':[1600,889], 'VMW-4':[1067,889], 'VMW-4a':[1422,889],
+  'VMW-5':[533,1041], 'VMW-6':[1067,1041], 'VMW-6a':[1422,1041],
+  'VMW-11':[533,1194], 'VMW-13':[1600,1194], 'VMW-13b':[1955,1194],
+  'VMSD':[1505,2019], 'VMSD-1':[1505,2019], 'VMSD 1505x2019':[1505,2019],
+  'VMSD 1810x2019':[1810,2019], 'VMSD 2419x2019':[2419,2019],
+};
+// 規格寸法 → 品番 の逆引き（寸法から正しい品番を推定）
+const SIZE_TO_CODE = {};
+for(const [code, [w,h]] of Object.entries(SIZE_MASTER)) {
+  const key = `${w}x${h}`;
+  if(!SIZE_TO_CODE[key]) SIZE_TO_CODE[key] = [];
+  if(!SIZE_TO_CODE[key].includes(code)) SIZE_TO_CODE[key].push(code);
+}
+
+function validateDimensions(marker, w, h) {
+  // マーカー名からベースコードを抽出 (例: "VMW-4" from "VMW-4 1067x889")
+  const baseCode = marker.split(/\s/)[0];
+  const spec = SIZE_MASTER[baseCode];
+  if(!spec) return null; // 規格マスタにない品番はチェック対象外
+
+  const [specW, specH] = spec;
+  const tolerance = 5; // 5mm以内は許容
+  if(Math.abs(w - specW) <= tolerance && Math.abs(h - specH) <= tolerance) return null; // OK
+
+  // 不一致 → 実寸法から正しい品番を逆引き
+  const actualKey = `${w}x${h}`;
+  const correctCodes = SIZE_TO_CODE[actualKey] || [];
+  // 近似検索（±5mm）
+  let nearCodes = [];
+  if(!correctCodes.length) {
+    for(const [key, codes] of Object.entries(SIZE_TO_CODE)) {
+      const [kw, kh] = key.split('x').map(Number);
+      if(Math.abs(kw - w) <= tolerance && Math.abs(kh - h) <= tolerance) {
+        nearCodes = codes;
+        break;
+      }
+    }
+  }
+  const suggestion = correctCodes.length ? correctCodes : nearCodes;
+  return {
+    marker: baseCode, specW, specH, actualW: w, actualH: h,
+    suggestion: suggestion.filter(c => c !== baseCode)
+  };
+}
+
 function matchToMaster(marker, w, h) {
   if(marker === '---') return matchByDimensions(w, h);
 
@@ -890,8 +940,35 @@ function showPdfResult(parsed, filename) {
   const taloItems = matchedItems.filter(it => it.marker !== '---');
   const jdItems = matchedItems.filter(it => it.marker === '---');
 
+  // 寸法チェック
+  const dimErrors = [];
+  for(const it of taloItems) {
+    const err = validateDimensions(it.marker, it.w, it.h);
+    if(err) dimErrors.push(err);
+  }
+
   let html = `<div class="pdf-result">`;
   html += `<h3><span class="badge green">${parsed.modelName}</span> 建具表読み取り結果 <span style="font-size:12px;color:var(--muted)">(${matchedItems.length}種類)</span></h3>`;
+
+  // 寸法不一致警告
+  if(dimErrors.length) {
+    html += `<div style="background:#fef2f2;border:2px solid #dc2626;border-radius:8px;padding:12px 16px;margin-bottom:12px">`;
+    html += `<div style="font-weight:700;color:#dc2626;margin-bottom:8px">⚠ CAD寸法エラー検出 (${dimErrors.length}件)</div>`;
+    html += `<table style="width:100%;font-size:13px"><thead><tr style="color:#dc2626"><th>品番</th><th class="num">規格W</th><th class="num">規格H</th><th class="num">実W</th><th class="num">実H</th><th>推定正解</th></tr></thead><tbody>`;
+    for(const e of dimErrors) {
+      const sugText = e.suggestion.length ? e.suggestion.join(', ') : '該当なし';
+      html += `<tr style="background:#fff">
+        <td><strong style="color:#dc2626">${esc(e.marker)}</strong></td>
+        <td class="num">${e.specW}</td><td class="num">${e.specH}</td>
+        <td class="num" style="color:#dc2626;font-weight:700">${e.actualW}</td>
+        <td class="num" style="color:#dc2626;font-weight:700">${e.actualH}</td>
+        <td><strong>${esc(sugText)}</strong></td>
+      </tr>`;
+    }
+    html += `</tbody></table>`;
+    html += `<div style="font-size:11px;color:#991b1b;margin-top:6px">マーカー名に対して実際の寸法が規格と一致しません。CADの入力ミスの可能性があります。</div>`;
+    html += `</div>`;
+  }
 
   // TALO items table
   if(taloItems.length) {
@@ -904,8 +981,11 @@ function showPdfResult(parsed, filename) {
         : `<span class="nomatch">${mr.source === 'EURO' ? '⚡ EURO' : '⚠ 新規'} ${esc(mr.label)}</span>`;
       const types = mr.matched ? mr.master.t : mr.types;
       const typeTags = types.map(t => `<span class="tag">${t}</span>`).join('');
-      html += `<tr>
-        <td><strong>${esc(it.marker)}</strong></td>
+      const dimErr = validateDimensions(it.marker, it.w, it.h);
+      const rowStyle = dimErr ? ' style="background:#fef2f2"' : '';
+      const dimWarn = dimErr ? ` <span style="color:#dc2626;font-size:11px;font-weight:700" title="規格: ${dimErr.specW}×${dimErr.specH}">⚠寸法</span>` : '';
+      html += `<tr${rowStyle}>
+        <td><strong>${esc(it.marker)}</strong>${dimWarn}</td>
         <td class="num">${it.qty}</td>
         <td class="num">${it.w.toLocaleString()}</td>
         <td class="num">${it.h.toLocaleString()}</td>
