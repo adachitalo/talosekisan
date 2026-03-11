@@ -554,198 +554,228 @@ KIND_CSS = {
 
 
 def generate_html(model_name, meshes, frames, fixtures_info, type_totals):
-    """Three.js 3Dビューア付きHTMLを生成"""
+    """Three.js 3Dビューア付きHTMLを生成（廻り縁・巾木ビューアと統一UI）"""
 
     fixture_count = len(fixtures_info)
     meshes_json = json.dumps(meshes, separators=(",", ":"))
     frames_json = json.dumps(frames, separators=(",", ":"))
     totals_json = json.dumps(type_totals, separators=(",", ":"), ensure_ascii=False)
 
-    kind_order = ["額縁", "額縁受け", "T-bar", "霧除け", "木口"]
-    kind_rows = ""
-    total_all = 0
-    for k in kind_order:
-        v = type_totals.get(k, 0)
-        if v == 0:
-            continue
-        total_all += v
-        kind_rows += f'<div class="kind-row"><span class="kind-dot" style="background:{KIND_CSS[k]}"></span><span class="label">{k}</span><span class="val" style="margin-left:auto">{v:.2f}m</span></div>\n'
-
     return f'''<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>額縁拾い3D {model_name}</title>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>額縁拾い 3Dビューア - {model_name}</title>
 <style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{background:#1a1a2e;overflow:hidden;font-family:'Segoe UI',sans-serif}}
-#cv{{display:block}}
-#info{{position:absolute;top:10px;left:10px;color:#fff;background:rgba(0,0,0,0.75);
-padding:12px 16px;border-radius:8px;font-size:13px;max-width:320px;z-index:10}}
-#info h3{{margin-bottom:8px;font-size:15px;border-bottom:1px solid #555;padding-bottom:4px}}
-.row{{display:flex;justify-content:space-between;padding:2px 0}}
-.row .label{{color:#aaa}}.row .val{{font-weight:bold}}
-.kind-row{{display:flex;align-items:center;gap:6px;padding:2px 0}}
-.kind-dot{{width:10px;height:10px;border-radius:50%;display:inline-block}}
-#controls{{position:absolute;top:10px;right:10px;display:flex;flex-direction:column;gap:4px;z-index:10}}
-#controls button{{padding:6px 12px;border:none;border-radius:4px;cursor:pointer;
-font-size:12px;color:#fff;opacity:0.85}}
-#controls button:hover{{opacity:1}}
-#controls button.active{{box-shadow:0 0 6px rgba(255,255,255,0.4)}}
-#controls button.inactive{{opacity:0.4}}
-#tooltip{{position:absolute;display:none;background:rgba(0,0,0,0.85);color:#fff;
-padding:6px 10px;border-radius:4px;font-size:12px;pointer-events:none;z-index:20}}
-</style></head><body>
-<canvas id="cv"></canvas>
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
+#info {{ position:fixed; top:10px; left:10px; color:#fff; background:rgba(0,0,0,0.75);
+  padding:12px 16px; border-radius:8px; font-size:13px; z-index:100; max-width:360px; }}
+#info h3 {{ margin-bottom:6px; color:#ff6b6b; font-size:15px; }}
+#legend {{ position:fixed; top:10px; right:10px; color:#fff; background:rgba(0,0,0,0.75);
+  padding:12px; border-radius:8px; font-size:12px; z-index:100; max-height:80vh; overflow-y:auto; }}
+#legend div {{ cursor:pointer; padding:3px 6px; border-radius:3px; margin:2px 0; white-space:nowrap; }}
+#legend div:hover {{ background:rgba(255,255,255,0.15); }}
+.cb {{ display:inline-block; width:14px; height:14px; border-radius:3px; margin-right:6px; vertical-align:middle; }}
+#frame-info {{ position:fixed; bottom:10px; left:10px; color:#fff; background:rgba(0,0,0,0.85);
+  padding:14px 18px; border-radius:8px; font-size:13px; z-index:100; line-height:1.6; }}
+#controls {{ position:fixed; bottom:10px; right:10px; z-index:100; }}
+#controls button {{ background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3);
+  padding:8px 14px; border-radius:6px; cursor:pointer; margin:2px; font-size:12px; }}
+#controls button:hover {{ background:rgba(255,255,255,0.3); }}
+#controls button.active {{ background:rgba(255,100,100,0.5); border-color:#ff6b6b; }}
+#tooltip {{ position:fixed; display:none; background:rgba(0,0,0,0.85); color:#fff;
+  padding:6px 10px; border-radius:4px; font-size:12px; pointer-events:none; z-index:200; }}
+</style>
+</head>
+<body>
 <div id="info">
-<h3>額縁拾い3D {model_name}</h3>
-<div class="row"><span class="label">対象建具:</span><span class="val">{fixture_count}箇所</span></div>
-<div style="margin-top:6px;border-top:1px solid #444;padding-top:6px"></div>
-{kind_rows}
-<div class="row" style="margin-top:4px;border-top:1px solid #444;padding-top:4px">
-<span class="label">合計</span><span class="val">{total_all:.2f}m</span></div>
+  <h3>額縁拾い 3Dビューア - {model_name}</h3>
+  <div>左ドラッグ: 回転 / 右ドラッグ: 移動 / ホイール: ズーム</div>
+  <div style="margin-top:4px;color:#aaa;">対象建具: {fixture_count}箇所</div>
+  <div id="sel-info" style="margin-top:6px;color:#aaa;">ホバーで部材情報表示</div>
 </div>
+<div id="frame-info"></div>
+<div id="legend"></div>
 <div id="controls"></div>
 <div id="tooltip"></div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script>
 const MESHES={meshes_json};
 const FRAMES={frames_json};
 const TYPE_TOTALS={totals_json};
 const FRAME_COLORS={{"額縁":0xff4444,"額縁受け":0x44ff44,"T-bar":0x4488ff,"霧除け":0xffaa00,"木口":0xff44ff}};
 const FRAME_CSS={{"額縁":"#ff4444","額縁受け":"#44ff44","T-bar":"#4488ff","霧除け":"#ffaa00","木口":"#ff44ff"}};
-
-const MESH_COLORS={{
-  "壁":0xcc7733,"ドア":0x5588cc,"窓":0x5588cc,"梁":0xddaa22,
-  "柱":0xcc8844,"1F床":0xddbb77,"手摺":0x888888,"屋根":0xcc3333,
-  "天窓":0x66aaff,"部材":0x999999,"階段":0xbbaa88
-}};
 const MESH_CSS={{
   "壁":"#cc7733","ドア":"#5588cc","窓":"#5588cc","梁":"#ddaa22",
   "柱":"#cc8844","1F床":"#ddbb77","手摺":"#888888","屋根":"#cc3333",
   "天窓":"#66aaff","部材":"#999999","階段":"#bbaa88"
 }};
-// 屋根はデフォルト非表示
 const HIDDEN_CATS={{"屋根":true}};
 
-const W=window.innerWidth,H=window.innerHeight;
-const renderer=new THREE.WebGLRenderer({{canvas:document.getElementById('cv'),antialias:true}});
-renderer.setSize(W,H);renderer.setPixelRatio(window.devicePixelRatio);
-const scene=new THREE.Scene();scene.background=new THREE.Color(0x1a1a2e);
-const camera=new THREE.PerspectiveCamera(50,W/H,0.1,500);
-const controls=new THREE.OrbitControls(camera,renderer.domElement);
-controls.enableDamping=true;controls.dampingFactor=0.08;
-scene.add(new THREE.AmbientLight(0xffffff,0.5));
-const dl=new THREE.DirectionalLight(0xffffff,0.7);dl.position.set(10,20,-10);scene.add(dl);
+const W=innerWidth, H=innerHeight;
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x1a1a2e);
+const camera=new THREE.PerspectiveCamera(50,W/H,0.01,1000);
+const renderer=new THREE.WebGLRenderer({{antialias:true}});
+renderer.setSize(W,H); renderer.setPixelRatio(devicePixelRatio);
+document.body.appendChild(renderer.domElement);
 
+scene.add(new THREE.AmbientLight(0xffffff,0.5));
+const dl=new THREE.DirectionalLight(0xffffff,0.7); dl.position.set(5,10,5); scene.add(dl);
+const dl2=new THREE.DirectionalLight(0xffffff,0.3); dl2.position.set(-5,5,-5); scene.add(dl2);
+
+// カスタムOrbitクラス（タッチ対応 - 廻り縁・巾木ビューアと共通）
+class Orbit{{
+constructor(c,e){{this.c=c;this.e=e;this.t=new THREE.Vector3();this.s=new THREE.Spherical();
+this._d=0;this._st=0;this._sv=new THREE.Vector2();
+e.addEventListener('mousedown',ev=>{{this._st=ev.button===0?1:ev.button===2?2:0;this._sv.set(ev.clientX,ev.clientY);
+const mm=ev2=>{{const dx=ev2.clientX-this._sv.x,dy=ev2.clientY-this._sv.y;this._sv.set(ev2.clientX,ev2.clientY);
+if(this._st===1)this._rot(dx,dy);else if(this._st===2)this._pan(dx,dy);}};
+const mu=()=>{{this._st=0;document.removeEventListener('mousemove',mm);document.removeEventListener('mouseup',mu);}};
+document.addEventListener('mousemove',mm);document.addEventListener('mouseup',mu);}});
+e.addEventListener('wheel',ev=>{{ev.preventDefault();this._zm(ev.deltaY>0?1.1:0.9);}},{{passive:false}});
+e.addEventListener('contextmenu',ev=>ev.preventDefault());
+let td=0;e.addEventListener('touchstart',ev=>{{ev.preventDefault();if(ev.touches.length===1){{this._st=1;this._sv.set(ev.touches[0].clientX,ev.touches[0].clientY);}}
+else if(ev.touches.length===2){{this._st=3;td=Math.hypot(ev.touches[1].clientX-ev.touches[0].clientX,ev.touches[1].clientY-ev.touches[0].clientY);}}}},{{passive:false}});
+e.addEventListener('touchmove',ev=>{{ev.preventDefault();if(this._st===1&&ev.touches.length===1){{const dx=ev.touches[0].clientX-this._sv.x,dy=ev.touches[0].clientY-this._sv.y;
+this._sv.set(ev.touches[0].clientX,ev.touches[0].clientY);this._rot(dx,dy);}}else if(this._st===3&&ev.touches.length===2){{
+const d=Math.hypot(ev.touches[1].clientX-ev.touches[0].clientX,ev.touches[1].clientY-ev.touches[0].clientY);this._zm(td/d);td=d;}}}},{{passive:false}});
+e.addEventListener('touchend',()=>{{this._st=0;}});}}
+_rot(dx,dy){{const o=this.c.position.clone().sub(this.t);this.s.setFromVector3(o);this.s.theta-=dx*0.008;this.s.phi-=dy*0.008;
+this.s.phi=Math.max(0.01,Math.min(Math.PI-0.01,this.s.phi));o.setFromSpherical(this.s);this.c.position.copy(this.t).add(o);this.c.lookAt(this.t);}}
+_pan(dx,dy){{const d=this.c.position.distanceTo(this.t)*0.001;const r=new THREE.Vector3().setFromMatrixColumn(this.c.matrix,0);
+const u=new THREE.Vector3().setFromMatrixColumn(this.c.matrix,1);const p=r.multiplyScalar(-dx*d).add(u.multiplyScalar(dy*d));
+this.c.position.add(p);this.t.add(p);this.c.lookAt(this.t);}}
+_zm(f){{const o=this.c.position.clone().sub(this.t);o.multiplyScalar(f);this.c.position.copy(this.t).add(o);this.c.lookAt(this.t);}}
+}}
+
+// 建物メッシュ
 const buildingGroup=new THREE.Group();
-const catGroups={{}};
-const bbox=new THREE.Box3();
+const catGroups={{}};const bbox=new THREE.Box3();
 MESHES.forEach(m=>{{
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.Float32BufferAttribute(m.verts,3));
   g.setIndex(m.faces);g.computeVertexNormals();
-  const color=MESH_COLORS[m.cat]||0x888888;
-  const mat=new THREE.MeshLambertMaterial({{color,transparent:true,opacity:0.25,side:THREE.DoubleSide}});
+  const color=new THREE.Color(MESH_CSS[m.cat]||'#999');
+  const mat=new THREE.MeshLambertMaterial({{color,transparent:true,opacity:0.2,side:THREE.DoubleSide,depthWrite:false}});
   const mesh=new THREE.Mesh(g,mat);
   if(!catGroups[m.cat]){{catGroups[m.cat]=new THREE.Group();}}
   catGroups[m.cat].add(mesh);
   bbox.expandByObject(mesh);
 }});
-// 屋根・天窓はbuildingGroupの外（独立制御）、それ以外はbuildingGroupの中
+// 屋根・天窓はbuildingGroupの外（独立制御）
 Object.keys(catGroups).forEach(c=>{{
   if(c==='屋根'||c==='天窓'){{scene.add(catGroups[c]);}}
   else{{buildingGroup.add(catGroups[c]);}}
 }});
 scene.add(buildingGroup);
-// 屋根をデフォルト非表示
 Object.keys(HIDDEN_CATS).forEach(c=>{{if(catGroups[c])catGroups[c].visible=false;}});
-const center=new THREE.Vector3();bbox.getCenter(center);
-const size=bbox.getSize(new THREE.Vector3());
-const maxDim=Math.max(size.x,size.y,size.z);
-camera.position.set(center.x+maxDim*0.8,center.y+maxDim*0.6,center.z+maxDim*0.8);
-controls.target.copy(center);camera.lookAt(center);
-const grid=new THREE.GridHelper(maxDim*1.5,20,0x444444,0x333333);
-grid.position.copy(center);grid.position.y=bbox.min.y;scene.add(grid);
 
+// 額縁ライン
 const frameGroups={{}};
 const kindOrder=["額縁","額縁受け","T-bar","霧除け","木口"];
-kindOrder.forEach(k=>{{frameGroups[k]=new THREE.Group();scene.add(frameGroups[k])}});
-
+kindOrder.forEach(k=>{{frameGroups[k]=new THREE.Group();scene.add(frameGroups[k]);}});
 FRAMES.forEach(f=>{{
   const color=FRAME_COLORS[f.kind]||0xffffff;
   const g=new THREE.BufferGeometry();
   const pts=f.points;
   g.setAttribute('position',new THREE.Float32BufferAttribute([pts[0][0],pts[0][1],pts[0][2],pts[1][0],pts[1][1],pts[1][2]],3));
-  const mat=new THREE.LineBasicMaterial({{color,linewidth:2}});
+  const mat=new THREE.LineBasicMaterial({{color,linewidth:3}});
   const line=new THREE.LineSegments(g,mat);
   line.userData={{kind:f.kind,length:f.length,fixture:f.fixture}};
   if(frameGroups[f.kind])frameGroups[f.kind].add(line);
 }});
 
-let totalAll=0;
+// 集計パネル（左下）
+let infoHtml='<b style="font-size:14px;">額縁集計（部材種別）</b><br><br>';
+let grandTotal=0;
 kindOrder.forEach(k=>{{
-  if(!TYPE_TOTALS[k]) return;
-  totalAll+=TYPE_TOTALS[k];
+  const t=TYPE_TOTALS[k]||0;
+  if(t===0) return;
+  const cc=FRAME_CSS[k]||"#fff";
+  grandTotal+=t;
+  infoHtml+=`<span style="color:${{cc}}">━━ ${{k}}: ${{t.toFixed(2)}}m</span><br>`;
 }});
+infoHtml+=`<br><b style="font-size:15px;">合計: ${{grandTotal.toFixed(2)}}m</b>`;
+document.getElementById('frame-info').innerHTML=infoHtml;
 
-const ctrlDiv=document.getElementById('controls');
+// カメラ設定
+const center=new THREE.Vector3();bbox.getCenter(center);
+const size=bbox.getSize(new THREE.Vector3());const maxDim=Math.max(size.x,size.y,size.z);
+camera.position.set(center.x+maxDim*0.8,center.y+maxDim*0.6,center.z+maxDim*0.8);
+const controls=new Orbit(camera,renderer.domElement);
+controls.t.copy(center);camera.lookAt(center);
 
-// 建物表示トグル
-let showB=true;
-const btnB=document.createElement('button');
-btnB.style.background='#666';btnB.textContent='建物表示';btnB.className='active';
-btnB.onclick=()=>{{showB=!showB;buildingGroup.visible=showB;btnB.className=showB?'active':'inactive';}};
-ctrlDiv.appendChild(btnB);
-
-// 額縁種別トグル
-kindOrder.forEach(k=>{{
-  if(!TYPE_TOTALS[k]) return;
-  const btn=document.createElement('button');
-  btn.style.background=FRAME_CSS[k];btn.textContent=k;
-  btn.className='active';
-  btn.onclick=()=>{{
-    const g=frameGroups[k];g.visible=!g.visible;
-    btn.className=g.visible?'active':'inactive';
-  }};
-  ctrlDiv.appendChild(btn);
-}});
-
-// カテゴリ凡例（クリックで個別ON/OFF）
-const cats=[...new Set(MESHES.map(m=>m.cat))];
-if(cats.length>0){{
-  const sep=document.createElement('div');sep.style.borderTop='1px solid rgba(255,255,255,0.3)';
-  sep.style.margin='4px 0';sep.style.width='100%';ctrlDiv.appendChild(sep);
-  cats.forEach(cat=>{{
-    const d=document.createElement('button');
-    d.style.background=MESH_CSS[cat]||'#888';d.textContent=cat;
-    d.className=HIDDEN_CATS[cat]?'inactive':'active';d.style.fontSize='11px';
-    d.onclick=()=>{{if(catGroups[cat]){{catGroups[cat].visible=!catGroups[cat].visible;d.className=catGroups[cat].visible?'active':'inactive';}}}};
-    ctrlDiv.appendChild(d);
-  }});
+function resetCam(){{
+  camera.position.set(center.x+maxDim*0.8,center.y+maxDim*0.6,center.z+maxDim*0.8);
+  controls.t.copy(center);camera.lookAt(center);
 }}
 
+const grid=new THREE.GridHelper(20,40,0x444444,0x333333);grid.position.copy(center);grid.position.y=0;scene.add(grid);
+
+// 凡例パネル（右上）: 額縁種別 + 建物カテゴリ
+const leg=document.getElementById('legend');
+kindOrder.forEach(k=>{{
+  const t=TYPE_TOTALS[k]||0;
+  if(t===0) return;
+  const cc=FRAME_CSS[k]||"#fff";
+  const d=document.createElement('div');
+  d.innerHTML='<span class="cb" style="background:'+cc+'"></span>'+k+' ('+t.toFixed(1)+'m)';
+  d.style.fontWeight='bold';
+  d.onclick=()=>{{if(frameGroups[k]){{frameGroups[k].visible=!frameGroups[k].visible;d.style.opacity=frameGroups[k].visible?1:0.3;}}}};
+  leg.appendChild(d);
+}});
+const sep=document.createElement('div');sep.style.borderTop='1px solid rgba(255,255,255,0.3)';sep.style.margin='6px 0';leg.appendChild(sep);
+[...new Set(MESHES.map(m=>m.cat))].forEach(cat=>{{
+  const d=document.createElement('div');
+  d.innerHTML='<span class="cb" style="background:'+(MESH_CSS[cat]||'#999')+'"></span>'+cat;
+  d.style.opacity=HIDDEN_CATS[cat]?0.3:1;
+  d.onclick=()=>{{if(catGroups[cat]){{catGroups[cat].visible=!catGroups[cat].visible;d.style.opacity=catGroups[cat].visible?1:0.3;}}}};
+  leg.appendChild(d);
+}});
+
+// コントロールボタン（右下）
+const ctrlDiv=document.getElementById('controls');
+kindOrder.forEach(k=>{{
+  const t=TYPE_TOTALS[k]||0;
+  if(t===0) return;
+  const btn=document.createElement('button');
+  btn.id='btn-'+k;btn.textContent=k;btn.className='active';
+  btn.onclick=()=>{{if(frameGroups[k]){{frameGroups[k].visible=!frameGroups[k].visible;btn.classList.toggle('active',frameGroups[k].visible);
+  const legItems=leg.querySelectorAll('div');legItems.forEach(d=>{{if(d.textContent.startsWith(k))d.style.opacity=frameGroups[k].visible?1:0.3;}});}}}};
+  ctrlDiv.appendChild(btn);
+}});
+const btnB=document.createElement('button');btnB.id='btn-building';btnB.textContent='建物表示';btnB.className='active';
+btnB.onclick=()=>{{let showB=buildingGroup.visible;showB=!showB;buildingGroup.visible=showB;btnB.classList.toggle('active',showB);}};
+ctrlDiv.appendChild(btnB);
+const btnR=document.createElement('button');btnR.textContent='リセット';
+btnR.onclick=resetCam;ctrlDiv.appendChild(btnR);
+
+// ツールチップ（ホバーで額縁情報表示）
 const tooltip=document.getElementById('tooltip');
 const raycaster=new THREE.Raycaster();raycaster.params.Line={{threshold:0.05}};
 const mouse=new THREE.Vector2();
 renderer.domElement.addEventListener('mousemove',e=>{{
-  mouse.x=(e.clientX/W)*2-1;mouse.y=-(e.clientY/H)*2+1;
+  mouse.x=(e.clientX/innerWidth)*2-1;mouse.y=-(e.clientY/innerHeight)*2+1;
   raycaster.setFromCamera(mouse,camera);
-  let all=[];kindOrder.forEach(k=>{{if(frameGroups[k])frameGroups[k].children.forEach(c=>all.push(c))}});
+  let all=[];kindOrder.forEach(k=>{{if(frameGroups[k])frameGroups[k].children.forEach(c=>all.push(c));}});
   const hits=raycaster.intersectObjects(all);
   if(hits.length>0){{
     const d=hits[0].object.userData;
     tooltip.style.display='block';
     tooltip.style.left=(e.clientX+12)+'px';tooltip.style.top=(e.clientY+12)+'px';
     tooltip.innerHTML=d.fixture+'<br>'+d.kind+': '+d.length+'mm';
-  }}else{{tooltip.style.display='none'}}
+    document.getElementById('sel-info').textContent=d.fixture+' / '+d.kind+': '+d.length+'mm';
+  }}else{{tooltip.style.display='none';document.getElementById('sel-info').textContent='ホバーで部材情報表示';}}
 }});
 
-window.addEventListener('resize',()=>{{
-  const w=window.innerWidth,h=window.innerHeight;
-  camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setSize(w,h);
-}});
-
-(function a(){{requestAnimationFrame(a);controls.update();renderer.render(scene,camera)}})();
-</script></body></html>'''
+(function anim(){{requestAnimationFrame(anim);renderer.render(scene,camera);}})();
+addEventListener('resize',()=>{{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);}});
+</script>
+</body>
+</html>'''
 
 
 # ============================================================================
