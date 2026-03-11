@@ -489,13 +489,12 @@ const renderer=new THREE.WebGLRenderer({{canvas:document.getElementById('cv'),an
 renderer.setSize(W,H);renderer.setPixelRatio(window.devicePixelRatio);
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x1a1a2e);
 const camera=new THREE.PerspectiveCamera(50,W/H,0.1,500);
-camera.position.set(15,12,-15);
 const controls=new THREE.OrbitControls(camera,renderer.domElement);
 controls.enableDamping=true;controls.dampingFactor=0.08;
 scene.add(new THREE.AmbientLight(0xffffff,0.5));
 const dl=new THREE.DirectionalLight(0xffffff,0.7);dl.position.set(10,20,-10);scene.add(dl);
 
-let cx=0,cy=0,cz=0,cnt=0;
+const bbox=new THREE.Box3();
 MESHES.forEach(m=>{{
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.Float32BufferAttribute(m.verts,3));
@@ -503,9 +502,15 @@ MESHES.forEach(m=>{{
   const color=MESH_COLORS[m.cat]||0x888888;
   const mat=new THREE.MeshLambertMaterial({{color,transparent:true,opacity:0.25,side:THREE.DoubleSide}});
   const mesh=new THREE.Mesh(g,mat);scene.add(mesh);
-  for(let i=0;i<m.verts.length;i+=3){{cx+=m.verts[i];cy+=m.verts[i+1];cz+=m.verts[i+2];cnt++}}
+  bbox.expandByObject(mesh);
 }});
-if(cnt>0)controls.target.set(cx/cnt,cy/cnt,cz/cnt);
+const center=new THREE.Vector3();bbox.getCenter(center);
+const size=bbox.getSize(new THREE.Vector3());
+const maxDim=Math.max(size.x,size.y,size.z);
+camera.position.set(center.x+maxDim*0.8,center.y+maxDim*0.6,center.z+maxDim*0.8);
+controls.target.copy(center);camera.lookAt(center);
+const grid=new THREE.GridHelper(maxDim*1.5,20,0x444444,0x333333);
+grid.position.copy(center);grid.position.y=bbox.min.y;scene.add(grid);
 
 const frameGroups={{}};
 const kindOrder=["額縁","額縁受け","T-bar","霧除け","木口"];
