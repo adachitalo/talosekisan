@@ -475,7 +475,7 @@ async function loadExistingViewers() {
         div.className = 'viewer-link';
         div.innerHTML = `<strong>${baseName}</strong> <span class="size">(${sizeMB} MB)</span><br>
           <span style="font-size:13px;">
-            <a href="${baseUrl}/mawari_${baseName}.html" target="_blank">廻り縁</a> |
+            <a href="${baseUrl}/${baseName}.html" target="_blank">廻り縁</a> |
             <a href="${baseUrl}/habaki_${baseName}.html" target="_blank">巾木</a> |
             <a href="${baseUrl}/buzai_${baseName}.xlsx" target="_blank">📊 Excel</a>
           </span>`;
@@ -511,7 +511,7 @@ function addResult(fileName, baseName) {
       <div class="detail">廻り縁・巾木・部材一覧Excelを生成しました</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:4px;">
-      <a href="${baseUrl}/mawari_${baseName}.html" target="_blank">廻り縁 →</a>
+      <a href="${baseUrl}/${baseName}.html" target="_blank">廻り縁 →</a>
       <a href="${baseUrl}/habaki_${baseName}.html" target="_blank">巾木 →</a>
       <a href="${baseUrl}/buzai_${baseName}.xlsx" target="_blank">Excel →</a>
     </div>

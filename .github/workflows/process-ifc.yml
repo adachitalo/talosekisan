@@ -47,10 +47,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: output-cache
-          key: ifc-outputs-${{ hashFiles('scripts/**') }}-${{ hashFiles('ifc/*.ifc', '*.ifc') }}
+          key: ifc-v2-${{ hashFiles('scripts/**') }}-${{ hashFiles('ifc/*.ifc', '*.ifc') }}
           restore-keys: |
-            ifc-outputs-${{ hashFiles('scripts/**') }}-
-            ifc-outputs-
+            ifc-v2-${{ hashFiles('scripts/**') }}-
+            ifc-v2-
 
       - name: Determine which IFC files to process
         id: find-ifc
@@ -109,17 +109,18 @@ jobs:
               echo "  Processing: $BASENAME"
               echo "========================================="
 
-              # 1. 廻り縁拾い3Dビューア
-              echo "--- 廻り縁拾い ---"
-              python scripts/build_mawari_buchi_viewer.py "$ifc" "output/mawari_${BASENAME}.html" || echo "::warning::廻り縁拾い失敗: $BASENAME"
+              # 3スクリプトを並列実行（IFC解析が重いため）
+              python scripts/build_mawari_buchi_viewer.py "$ifc" "output/${BASENAME}.html" &
+              PID1=$!
+              python scripts/build_habaki_viewer.py "$ifc" "output/habaki_${BASENAME}.html" &
+              PID2=$!
+              python scripts/extract_ifc.py "$ifc" "output/buzai_${BASENAME}.xlsx" &
+              PID3=$!
 
-              # 2. 巾木拾い3Dビューア
-              echo "--- 巾木拾い ---"
-              python scripts/build_habaki_viewer.py "$ifc" "output/habaki_${BASENAME}.html" || echo "::warning::巾木拾い失敗: $BASENAME"
-
-              # 3. 部材一覧Excel
-              echo "--- 部材一覧Excel ---"
-              python scripts/extract_ifc.py "$ifc" "output/buzai_${BASENAME}.xlsx" || echo "::warning::部材一覧Excel失敗: $BASENAME"
+              # 全完了を待つ
+              wait $PID1 || echo "::warning::廻り縁拾い失敗: $BASENAME"
+              wait $PID2 || echo "::warning::巾木拾い失敗: $BASENAME"
+              wait $PID3 || echo "::warning::部材一覧Excel失敗: $BASENAME"
 
             done
           else
@@ -142,12 +143,18 @@ jobs:
           done
 
           # IFCモデル一覧を動的に構築
-          MODEL_CARDS=""
-          for mawari in output/mawari_*.html; do
-            [ -f "$mawari" ] || continue
-            BASENAME=$(basename "$mawari" .html | sed 's/^mawari_//')
+          # 旧ファイル名(mawari_*)がキャッシュに残っている場合は削除
+          rm -f output/mawari_*.html 2>/dev/null || true
 
-            LINKS="<a href='mawari_${BASENAME}.html'>廻り縁拾い</a>"
+          MODEL_CARDS=""
+          for viewer in output/*.html; do
+            [ -f "$viewer" ] || continue
+            VNAME=$(basename "$viewer" .html)
+            # habaki_, upload, index, 額縁拾い等はスキップ
+            echo "$VNAME" | grep -qE '^(habaki_|upload|index|額縁拾い)' && continue
+
+            BASENAME="$VNAME"
+            LINKS="<a href='${BASENAME}.html'>廻り縁拾い</a>"
             if [ -f "output/habaki_${BASENAME}.html" ]; then
               LINKS="${LINKS} | <a href='habaki_${BASENAME}.html'>巾木拾い</a>"
             fi
