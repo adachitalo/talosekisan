@@ -1,4 +1,4 @@
-name: IFC → 積算ツール（廻り縁・巾木・額縁・垂木・部材一覧Excel・キット積算）
+name: IFC → 積算ツール（廻り縁・巾木・額縁・垂木・根太・部材一覧Excel・キット積算）
 
 on:
   push:
@@ -109,7 +109,7 @@ jobs:
               echo "  Processing: $BASENAME"
               echo "========================================="
 
-              # 5スクリプトを並列実行（IFC解析が重いため）
+              # 6スクリプトを並列実行（IFC解析が重いため）
               python scripts/build_mawari_buchi_viewer.py "$ifc" "output/${BASENAME}.html" &
               PID1=$!
               python scripts/build_habaki_viewer.py "$ifc" "output/habaki_${BASENAME}.html" &
@@ -120,6 +120,8 @@ jobs:
               PID4=$!
               python scripts/build_taruki_viewer.py "$ifc" "output/taruki_${BASENAME}.html" &
               PID5=$!
+              python scripts/build_neda_viewer.py "$ifc" "output/neda_${BASENAME}.html" &
+              PID6=$!
 
               # 全完了を待つ
               wait $PID1 || echo "::warning::廻り縁拾い失敗: $BASENAME"
@@ -127,6 +129,7 @@ jobs:
               wait $PID3 || echo "::warning::部材一覧Excel失敗: $BASENAME"
               wait $PID4 || echo "::warning::額縁拾い失敗: $BASENAME"
               wait $PID5 || echo "::warning::垂木拾い失敗: $BASENAME"
+              wait $PID6 || echo "::warning::根太拾い失敗: $BASENAME"
 
               # 廻り縁・巾木・額縁の集計JSONを部材一覧Excelに統合
               if [ -f "output/buzai_${BASENAME}.xlsx" ]; then
@@ -163,7 +166,7 @@ jobs:
             [ -f "$viewer" ] || continue
             VNAME=$(basename "$viewer" .html)
             # habaki_, gakubuchi_, upload, index, 額縁拾い等はスキップ
-            echo "$VNAME" | grep -qE '^(habaki_|gakubuchi_|gakubuchi|taruki_|upload|index)' && continue
+            echo "$VNAME" | grep -qE '^(habaki_|gakubuchi_|gakubuchi|taruki_|neda_|upload|index)' && continue
 
             BASENAME="$VNAME"
             LINKS="<a href='${BASENAME}.html'>廻り縁拾い</a>"
@@ -175,6 +178,9 @@ jobs:
             fi
             if [ -f "output/taruki_${BASENAME}.html" ]; then
               LINKS="${LINKS} | <a href='taruki_${BASENAME}.html'>垂木拾い</a>"
+            fi
+            if [ -f "output/neda_${BASENAME}.html" ]; then
+              LINKS="${LINKS} | <a href='neda_${BASENAME}.html'>根太拾い</a>"
             fi
             if [ -f "output/buzai_${BASENAME}.xlsx" ]; then
               LINKS="${LINKS} | <a href='buzai_${BASENAME}.xlsx'>📊 部材一覧Excel</a>"
@@ -210,7 +216,7 @@ jobs:
           </style></head>
           <body>
           <h1>TALO 積算ツール</h1>
-          <p class="sub">IFCファイルから廻り縁拾い・巾木拾い・額縁拾い・垂木拾い・部材一覧Excel・キット積算Excelを自動生成</p>
+          <p class="sub">IFCファイルから廻り縁拾い・巾木拾い・額縁拾い・垂木拾い・根太拾い・部材一覧Excel・キット積算Excelを自動生成</p>
           <a href="upload.html" class="upload-btn">📤 IFCファイルをアップロード</a>
           <a href="gakubuchi.html" class="tool-btn">🪟 額縁拾い・木取り計算</a>
           <h2>生成済みモデル</h2>
