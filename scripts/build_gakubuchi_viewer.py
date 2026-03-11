@@ -646,9 +646,14 @@ MESHES.forEach(m=>{{
   const color=MESH_COLORS[m.cat]||0x888888;
   const mat=new THREE.MeshLambertMaterial({{color,transparent:true,opacity:0.25,side:THREE.DoubleSide}});
   const mesh=new THREE.Mesh(g,mat);
-  if(!catGroups[m.cat]){{catGroups[m.cat]=new THREE.Group();buildingGroup.add(catGroups[m.cat]);}}
+  if(!catGroups[m.cat]){{catGroups[m.cat]=new THREE.Group();}}
   catGroups[m.cat].add(mesh);
   bbox.expandByObject(mesh);
+}});
+// 屋根・天窓はbuildingGroupの外（独立制御）、それ以外はbuildingGroupの中
+Object.keys(catGroups).forEach(c=>{{
+  if(c==='屋根'||c==='天窓'){{scene.add(catGroups[c]);}}
+  else{{buildingGroup.add(catGroups[c]);}}
 }});
 scene.add(buildingGroup);
 // 屋根をデフォルト非表示
@@ -690,17 +695,6 @@ const btnB=document.createElement('button');
 btnB.style.background='#666';btnB.textContent='建物表示';btnB.className='active';
 btnB.onclick=()=>{{showB=!showB;buildingGroup.visible=showB;btnB.className=showB?'active':'inactive';}};
 ctrlDiv.appendChild(btnB);
-
-// 屋根トグル（デフォルト非表示）
-if(catGroups['屋根']){{
-  const btnR=document.createElement('button');
-  btnR.style.background='#cc3333';btnR.textContent='屋根表示';btnR.className='inactive';
-  btnR.onclick=()=>{{
-    const g=catGroups['屋根'];g.visible=!g.visible;
-    btnR.className=g.visible?'active':'inactive';
-  }};
-  ctrlDiv.appendChild(btnR);
-}}
 
 // 額縁種別トグル
 kindOrder.forEach(k=>{{
