@@ -68,18 +68,23 @@ def classify_slab(en, ln):
 
 def detect_roof_params(ifc, settings):
     """IFC屋根メッシュから勾配天井パラメータを自動検出。
-    面法線で屋根上面を特定し、棟の方向・位置を算出。
+    面法線で屋根上面を特定し、棟の方向・位置・勾配比を算出。
+    軒先Y座標は面法線から算出した勾配比で計算（鼻隠し下端ではなく屋根面の延長）。
     Returns dict with ridge_axis, slope_axis, ridge_pos, ridge_height,
-    eave_pos_min, eave_pos_max, eave_height, ridge_range_min, ridge_range_max
+    eave_pos_min, eave_pos_max, eave_height_min, eave_height_max,
+    ridge_range_min, ridge_range_max, slope_ratio
     """
     top_verts = []  # 上向き法線の面の頂点（屋根上面）
+    # 法線と面積のペアを前面/背面別に保持
+    front_normals = []  # slope_axis負方向の面
+    back_normals = []   # slope_axis正方向の面
 
-    for slab in ifc.by_type("IfcSlab"):
-        ename = (slab.Name or "").lower()
-        if "yane" not in ename and "roof" not in ename:
+    for elem in list(ifc.by_type("IfcSlab")) + list(ifc.by_type("IfcRoof")):
+        ename = (elem.Name or "").lower()
+        if elem.is_a("IfcSlab") and "yane" not in ename and "roof" not in ename:
             continue
         try:
-            shape = ifcopenshell.geom.create_shape(settings, slab)
+            shape = ifcopenshell.geom.create_shape(settings, elem)
             vf = shape.geometry.verts
             ff = shape.geometry.faces
             pts = []
@@ -96,28 +101,8 @@ def detect_roof_params(ifc, settings):
                 normal = normal / norm_len
                 if normal[1] > 0.3:  # 上向き法線 = 屋根上面
                     top_verts.extend([pts[i0], pts[i1], pts[i2]])
-        except Exception:
-            pass
-
-    for roof in ifc.by_type("IfcRoof"):
-        try:
-            shape = ifcopenshell.geom.create_shape(settings, roof)
-            vf = shape.geometry.verts
-            ff = shape.geometry.faces
-            pts = []
-            for i in range(0, len(vf), 3):
-                pts.append([vf[i], vf[i+2], -vf[i+1]])
-            pts = np.array(pts)
-            for i in range(0, len(ff), 3):
-                i0, i1, i2 = ff[i], ff[i+1], ff[i+2]
-                p0, p1, p2 = pts[i0], pts[i1], pts[i2]
-                normal = np.cross(p1 - p0, p2 - p0)
-                norm_len = np.linalg.norm(normal)
-                if norm_len < 1e-10:
-                    continue
-                normal = normal / norm_len
-                if normal[1] > 0.3:
-                    top_verts.extend([pts[i0], pts[i1], pts[i2]])
+                    area = norm_len / 2
+                    front_normals.append((normal, area))  # 後でaxis判定後に振り分け
         except Exception:
             pass
 
@@ -145,6 +130,7 @@ def detect_roof_params(ifc, settings):
     if ridge_x_span > ridge_z_span:
         ridge_axis = "x"
         slope_axis = "z"
+        slope_idx = 2  # Z
         ridge_pos = float(np.median(ridge_pts[:, 2]))
         eave_pos_min = float(tv[:, 2].min())
         eave_pos_max = float(tv[:, 2].max())
@@ -153,21 +139,41 @@ def detect_roof_params(ifc, settings):
     else:
         ridge_axis = "z"
         slope_axis = "x"
+        slope_idx = 0  # X
         ridge_pos = float(np.median(ridge_pts[:, 0]))
         eave_pos_min = float(tv[:, 0].min())
         eave_pos_max = float(tv[:, 0].max())
         ridge_range_min = float(tv[:, 2].min())
         ridge_range_max = float(tv[:, 2].max())
 
-    # 軒先高さ
-    if slope_axis == "x":
-        eave_mask = (np.abs(tv[:, 0] - eave_pos_min) < 0.3) | \
-                    (np.abs(tv[:, 0] - eave_pos_max) < 0.3)
-    else:
-        eave_mask = (np.abs(tv[:, 2] - eave_pos_min) < 0.3) | \
-                    (np.abs(tv[:, 2] - eave_pos_max) < 0.3)
-    eave_pts = tv[eave_mask]
-    eave_height = float(eave_pts[:, 1].min()) if len(eave_pts) > 0 else float(tv[:, 1].min())
+    # 法線から勾配比を算出（面積加重平均）
+    # slope_axis方向の法線成分で前面/背面を振り分け
+    fn_list = []  # 前面（slope_axis負方向）
+    bn_list = []  # 背面（slope_axis正方向）
+    for normal, area in front_normals:
+        if normal[slope_idx] < -0.1:
+            fn_list.append((normal, area))
+        elif normal[slope_idx] > 0.1:
+            bn_list.append((normal, area))
+
+    slope_ratio = 0.6  # デフォルト（6寸勾配）
+    if fn_list:
+        fn_avg = np.average([n for n, a in fn_list], weights=[a for n, a in fn_list], axis=0)
+        fn_avg = fn_avg / np.linalg.norm(fn_avg)
+        slope_ratio = abs(fn_avg[slope_idx]) / fn_avg[1]
+        slope_angle = np.degrees(np.arctan(slope_ratio))
+        print(f"\n  Front face slope: ratio={slope_ratio:.4f} angle={slope_angle:.1f}deg")
+    if bn_list:
+        bn_avg = np.average([n for n, a in bn_list], weights=[a for n, a in bn_list], axis=0)
+        bn_avg = bn_avg / np.linalg.norm(bn_avg)
+        back_slope = abs(bn_avg[slope_idx]) / bn_avg[1]
+        print(f"  Back face slope:  ratio={back_slope:.4f} angle={np.degrees(np.arctan(back_slope)):.1f}deg")
+        # 前後の平均を使用（通常は同じ勾配）
+        slope_ratio = (slope_ratio + back_slope) / 2
+
+    # 軒先Y座標: 勾配比から算出（鼻隠し下端ではなく屋根面の実際の高さ）
+    eave_height_min = ridge_height - abs(ridge_pos - eave_pos_min) * slope_ratio
+    eave_height_max = ridge_height - abs(eave_pos_max - ridge_pos) * slope_ratio
 
     result = {
         "ridge_axis": ridge_axis,
@@ -176,9 +182,11 @@ def detect_roof_params(ifc, settings):
         "ridge_height": float(ridge_height),
         "eave_pos_min": eave_pos_min,
         "eave_pos_max": eave_pos_max,
-        "eave_height": eave_height,
+        "eave_height_min": float(eave_height_min),
+        "eave_height_max": float(eave_height_max),
         "ridge_range_min": ridge_range_min,
         "ridge_range_max": ridge_range_max,
+        "slope_ratio": float(slope_ratio),
     }
 
     print(f"\n  Detected roof parameters:")
@@ -187,26 +195,16 @@ def detect_roof_params(ifc, settings):
     print(f"    Ridge position ({slope_axis.upper()}): {ridge_pos:.3f}")
     print(f"    Ridge height (Y): {ridge_height:.3f}")
     print(f"    Eave positions ({slope_axis.upper()}): [{eave_pos_min:.3f}, {eave_pos_max:.3f}]")
-    print(f"    Eave height (Y): {eave_height:.3f}")
+    print(f"    Eave heights (Y): min={eave_height_min:.3f}, max={eave_height_max:.3f}")
+    print(f"    Slope ratio (rise/run): {slope_ratio:.4f}")
     print(f"    Ridge range ({ridge_axis.upper()}): [{ridge_range_min:.3f}, {ridge_range_max:.3f}]")
 
     return result
 
 
 def roof_surface_y(slope_coord, rp):
-    """屋根上面のY座標を返す（切妻屋根）"""
-    if slope_coord <= rp["ridge_pos"]:
-        denom = rp["ridge_pos"] - rp["eave_pos_min"]
-        if abs(denom) < 0.01:
-            return rp["ridge_height"]
-        return rp["eave_height"] + (rp["ridge_height"] - rp["eave_height"]) * \
-            (slope_coord - rp["eave_pos_min"]) / denom
-    else:
-        denom = rp["eave_pos_max"] - rp["ridge_pos"]
-        if abs(denom) < 0.01:
-            return rp["ridge_height"]
-        return rp["eave_height"] + (rp["ridge_height"] - rp["eave_height"]) * \
-            (rp["eave_pos_max"] - slope_coord) / denom
+    """屋根上面のY座標を返す（切妻屋根・勾配比ベース）"""
+    return rp["ridge_height"] - abs(slope_coord - rp["ridge_pos"]) * rp["slope_ratio"]
 
 
 ###############################################################################
@@ -299,7 +297,8 @@ def detect_roof_openings(ifc, settings, rp):
             center_y = (pts[:, 1].min() + pts[:, 1].max()) / 2
 
             # 屋根上の窓かどうか: Y座標がeave_height付近以上
-            if center_y > rp["eave_height"] - 0.3:
+            eave_h = min(rp["eave_height_min"], rp["eave_height_max"])
+            if center_y > eave_h - 0.3:
                 if ridge_axis == "x":
                     r_min = float(pts[:, 0].min())
                     r_max = float(pts[:, 0].max())
@@ -376,14 +375,18 @@ def place_rafters(rp, wall_edges, openings):
     ridge_min = rp["ridge_range_min"]
     ridge_max = rp["ridge_range_max"]
 
-    # 1. 基本ピッチ配置 (455mm)
+    # 0. 屋根両端に必ず配置
     rafter_positions = {}  # ridge_coord → {reason, double}
+    rafter_positions[round(ridge_min, 4)] = {"reason": "屋根端部", "double": False}
+    rafter_positions[round(ridge_max, 4)] = {"reason": "屋根端部", "double": False}
 
+    # 1. 基本ピッチ配置 (455mm)
     # 基準点は軒先端から455mmピッチ
     pos = ridge_min
     while pos <= ridge_max + 0.001:
         key = round(pos, 4)
-        rafter_positions[key] = {"reason": "基本ピッチ", "double": False}
+        if key not in rafter_positions:
+            rafter_positions[key] = {"reason": "基本ピッチ", "double": False}
         pos += RAFTER_PITCH
 
     # 2. ログ壁エッジに配置（垂木と平行な壁＝勾配方向に走る壁のみ）
@@ -446,11 +449,12 @@ def generate_rafter_lines(rafters, rp):
         double = r["double"]
 
         # 各垂木位置で、棟から軒先への2本のライン（左右勾配面）
-        for side_label, eave_pos in [("前面", rp["eave_pos_min"]), ("背面", rp["eave_pos_max"])]:
+        for side_label, eave_pos, eave_y in [
+            ("前面", rp["eave_pos_min"], rp["eave_height_min"]),
+            ("背面", rp["eave_pos_max"], rp["eave_height_max"]),
+        ]:
             # 棟での座標
             ridge_y = rp["ridge_height"]
-            # 軒先での座標
-            eave_y = rp["eave_height"]
 
             if ridge_axis == "x":
                 p_ridge = [rc, ridge_y, rp["ridge_pos"]]
@@ -591,10 +595,13 @@ def main():
     print(f"  配置位置: {len(rafters)}箇所")
 
     n_double = sum(1 for r in rafters if r["double"])
+    n_edge = sum(1 for r in rafters if "屋根端部" in r["reason"])
     n_wall = sum(1 for r in rafters if "ログ壁" in r["reason"])
     n_skylight = sum(1 for r in rafters if "天窓" in r["reason"])
     n_chimney = sum(1 for r in rafters if "煙突" in r["reason"])
-    print(f"    基本ピッチ: {len(rafters) - n_wall - n_skylight - n_chimney}箇所")
+    n_basic = len(rafters) - n_edge - n_wall - n_skylight - n_chimney
+    print(f"    基本ピッチ: {n_basic}箇所")
+    print(f"    屋根端部: {n_edge}箇所")
     print(f"    ログ壁脇: {n_wall}箇所")
     print(f"    天窓脇: {n_skylight}箇所")
     print(f"    煙突脇: {n_chimney}箇所")
@@ -732,6 +739,7 @@ const SUMMARY={summary_json};
 
 const REASON_COLORS = {{
   "基本ピッチ": 0xffa500,
+  "屋根端部": 0x00ccff,
   "ログ壁脇": 0x00ff88,
   "天窓脇": 0xff4444,
   "煙突脇": 0xff00ff,
