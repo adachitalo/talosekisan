@@ -246,7 +246,7 @@ const FRAME_RULES = {
   "MTPDL":{front_frame:"4", back_frame:"3", front_extras:["額縁受け","T-bar","霧除け"]},
   "NHW":  {front_frame:"4", back_frame:"3", front_extras:["T-bar","木口"]},
 };
-// 間仕切り壁の場合 (NV/NWのみルール変更あり、他はログ壁と同じ)
+// 間仕切壁の場合 (NV/NWのみルール変更あり、他はログ壁と同じ)
 const PARTITION_RULES = {
   "NV":  {front_frame:"3", back_frame:"3", front_extras:[]},
   "NW":  {front_frame:"3", back_frame:"3", front_extras:["木口"]},
@@ -349,9 +349,16 @@ function toggleType(itemIdx, type) {
     renderSelected();
     return;
   }
-  // 間仕切り壁: 押す度にlog/partition切り替え
+  // 間仕切壁: 押す度にlog/partition切り替え
   if(type === '__wall__') {
-    item.wall = (item.wall === 'partition') ? 'log' : 'partition';
+    if(item.wall === 'partition') {
+      item.wall = 'log';
+    } else {
+      item.wall = 'partition';
+      // 間仕切壁にはT-barがつかないので自動オフ
+      const tIdx = item.t.indexOf('T-bar');
+      if(tIdx >= 0) item.t.splice(tIdx, 1);
+    }
     renderSelected();
     return;
   }
@@ -392,9 +399,9 @@ function renderSelected() {
       return `<span class="tag-toggle ${on?'on':'off'}" onclick="toggleType(${i},'${t}')" title="クリックで切替">${t}</span>`;
     }).join('');
 
-    // 間仕切り壁ボタン (トグル)
+    // 間仕切壁ボタン (トグル)
     const isPartition = (s.wall === 'partition');
-    const wallTag = `<span class="tag-toggle ${isPartition?'on':'off'}" style="${isPartition?'background:var(--accent3);border-color:var(--accent3)':''}" onclick="toggleType(${i},'__wall__')" title="クリックで切替">間仕切り壁</span>`;
+    const wallTag = `<span class="tag-toggle ${isPartition?'on':'off'}" style="${isPartition?'background:var(--accent3);border-color:var(--accent3)':''}" onclick="toggleType(${i},'__wall__')" title="クリックで切替">間仕切壁</span>`;
 
     const pieceCnt = countPiecesForItem(s);
     return `<div class="selected-item">
