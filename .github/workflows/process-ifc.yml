@@ -1,4 +1,4 @@
-name: IFC → 積算ツール（廻り縁・巾木・額縁・部材一覧Excel）
+name: IFC → 積算ツール（廻り縁・巾木・額縁・部材一覧Excel・キット積算）
 
 on:
   push:
@@ -114,7 +114,7 @@ jobs:
               PID1=$!
               python scripts/build_habaki_viewer.py "$ifc" "output/habaki_${BASENAME}.html" &
               PID2=$!
-              python scripts/extract_ifc.py "$ifc" "output/buzai_${BASENAME}.xlsx" &
+              python scripts/extract_ifc.py "$ifc" "output/buzai_${BASENAME}.xlsx" "output/kit_${BASENAME}.xlsx" &
               PID3=$!
               python scripts/build_gakubuchi_viewer.py "$ifc" "output/gakubuchi_${BASENAME}.html" &
               PID4=$!
@@ -173,6 +173,9 @@ jobs:
             if [ -f "output/buzai_${BASENAME}.xlsx" ]; then
               LINKS="${LINKS} | <a href='buzai_${BASENAME}.xlsx'>📊 部材一覧Excel</a>"
             fi
+            if [ -f "output/kit_${BASENAME}.xlsx" ]; then
+              LINKS="${LINKS} | <a href='kit_${BASENAME}.xlsx'>💰 キット積算Excel</a>"
+            fi
 
             MODEL_CARDS="${MODEL_CARDS}<div class='model-card'><h3>${BASENAME}</h3><div class='links'>${LINKS}</div></div>"
           done
@@ -201,7 +204,7 @@ jobs:
           </style></head>
           <body>
           <h1>TALO 積算ツール</h1>
-          <p class="sub">IFCファイルから廻り縁拾い・巾木拾い・額縁拾い・部材一覧Excelを自動生成</p>
+          <p class="sub">IFCファイルから廻り縁拾い・巾木拾い・額縁拾い・部材一覧Excel・キット積算Excelを自動生成</p>
           <a href="upload.html" class="upload-btn">📤 IFCファイルをアップロード</a>
           <a href="額縁拾い.html" class="tool-btn">🪟 額縁拾い・木取り計算</a>
           <h2>生成済みモデル</h2>

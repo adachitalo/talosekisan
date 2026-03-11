@@ -218,7 +218,7 @@ h1 {
 <body>
 
 <h1>TALO 積算ツール</h1>
-<p class="subtitle">IFCファイルをドラッグ＆ドロップして廻り縁・巾木・部材一覧Excelを自動生成</p>
+<p class="subtitle">IFCファイルをドラッグ＆ドロップして廻り縁・巾木・部材一覧Excel・キット積算Excelを自動生成</p>
 
 <!-- Token setup -->
 <details class="token-section" id="tokenSection">
@@ -477,7 +477,8 @@ async function loadExistingViewers() {
           <span style="font-size:13px;">
             <a href="${baseUrl}/${baseName}.html" target="_blank">廻り縁</a> |
             <a href="${baseUrl}/habaki_${baseName}.html" target="_blank">巾木</a> |
-            <a href="${baseUrl}/buzai_${baseName}.xlsx" target="_blank">📊 Excel</a>
+            <a href="${baseUrl}/buzai_${baseName}.xlsx" target="_blank">📊 部材Excel</a> |
+            <a href="${baseUrl}/kit_${baseName}.xlsx" target="_blank">💰 キット積算</a>
           </span>`;
         list.appendChild(div);
       }
@@ -508,12 +509,13 @@ function addResult(fileName, baseName) {
     <div class="icon">✅</div>
     <div class="info">
       <div class="name">${fileName}</div>
-      <div class="detail">廻り縁・巾木・部材一覧Excelを生成しました</div>
+      <div class="detail">廻り縁・巾木・部材一覧Excel・キット積算Excelを生成しました</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:4px;">
       <a href="${baseUrl}/${baseName}.html" target="_blank">廻り縁 →</a>
       <a href="${baseUrl}/habaki_${baseName}.html" target="_blank">巾木 →</a>
-      <a href="${baseUrl}/buzai_${baseName}.xlsx" target="_blank">Excel →</a>
+      <a href="${baseUrl}/buzai_${baseName}.xlsx" target="_blank">📊 部材Excel →</a>
+      <a href="${baseUrl}/kit_${baseName}.xlsx" target="_blank">💰 キット積算 →</a>
     </div>
   `;
   document.getElementById('results').prepend(div);

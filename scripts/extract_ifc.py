@@ -8,8 +8,12 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from collections import Counter, defaultdict
 
-IFC_PATH = "/sessions/focused-exciting-ride/mnt/TALO IFC sekisan/ie4d1_2023.ifc"
-OUTPUT_PATH = "/sessions/focused-exciting-ride/mnt/TALO IFC sekisan/部材一覧_ie4d1.xlsx"
+import sys as _sys
+
+# デフォルトパス（CLI引数で上書き可能）
+IFC_PATH = ""
+OUTPUT_PATH = ""
+KIT_OUTPUT_PATH = ""  # キット積算Excel出力パス（空なら自動生成）
 
 TYPE_NAMES = {
     "IfcWall": "壁", "IfcWallStandardCase": "壁",
@@ -249,7 +253,19 @@ def extract_key_props(psets, ifc_type):
     }
 
 def main():
-    print("IFC読み込み中...")
+    global IFC_PATH, OUTPUT_PATH, KIT_OUTPUT_PATH
+
+    # CLI: python extract_ifc.py <input.ifc> <output.xlsx> [kit_output.xlsx]
+    if len(_sys.argv) >= 3:
+        IFC_PATH = _sys.argv[1]
+        OUTPUT_PATH = _sys.argv[2]
+        if len(_sys.argv) >= 4:
+            KIT_OUTPUT_PATH = _sys.argv[3]
+    elif not IFC_PATH or not OUTPUT_PATH:
+        print("Usage: python extract_ifc.py <input.ifc> <output.xlsx> [kit_output.xlsx]")
+        _sys.exit(1)
+
+    print(f"IFC読み込み中... {IFC_PATH}")
     ifc_file = ifcopenshell.open(IFC_PATH)
     target_types = [t for t in TYPE_NAMES.keys() if t not in SKIP_TYPES]
     all_elements = []
@@ -845,8 +861,8 @@ def _collect_kit_quantities(all_elements, marker_stats):
 def generate_kit_estimate(all_elements, marker_stats, summary_rows):
     """キット積算・価格計算 Excel を自動生成（内蔵テンプレート使用）。成功時はパスを返す。"""
     out_dir = os.path.dirname(os.path.abspath(OUTPUT_PATH))
-    model_name = os.path.splitext(os.path.basename(OUTPUT_PATH))[0].replace("部材一覧_", "")
-    kit_out = os.path.join(out_dir, f"キット積算_{model_name}.xlsx")
+    model_name = os.path.splitext(os.path.basename(OUTPUT_PATH))[0].replace("部材一覧_", "").replace("buzai_", "")
+    kit_out = KIT_OUTPUT_PATH or os.path.join(out_dir, f"キット積算_{model_name}.xlsx")
 
     # モデルタイプ検出 → シート名決定
     model_type = _detect_model_type(model_name)
