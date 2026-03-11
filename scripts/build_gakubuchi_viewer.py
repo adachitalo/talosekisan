@@ -261,7 +261,13 @@ def extract_meshes(ifc_file):
             cat = type_map.get(ifc_type, "")
             if not cat:
                 continue
-            meshes.append({"cat": cat, "verts": verts, "faces": faces})
+            # IFC(Z-up) → Three.js(Y-up) 座標変換: (x,y,z)→(x,z,-y)
+            verts_3js = []
+            for vi in range(0, len(verts), 3):
+                verts_3js.append(round(verts[vi], 4))
+                verts_3js.append(round(verts[vi + 2], 4))
+                verts_3js.append(round(-verts[vi + 1], 4))
+            meshes.append({"cat": cat, "verts": verts_3js, "faces": faces})
         except Exception:
             pass
 
@@ -354,11 +360,12 @@ def detect_fixtures_and_frames(ifc_file):
                     w_m, h_m, offset
                 )
 
+                # IFC(Z-up) → Three.js(Y-up): (x,y,z)→(x,z,-y)
                 all_frames.append({
                     "kind": kind,
                     "points": [
-                        [round(p1[0], 3), round(p1[1], 3), round(p1[2], 3)],
-                        [round(p2[0], 3), round(p2[1], 3), round(p2[2], 3)]
+                        [round(p1[0], 3), round(p1[2], 3), round(-p1[1], 3)],
+                        [round(p2[0], 3), round(p2[2], 3), round(-p2[1], 3)]
                     ],
                     "length": round(length_mm),
                     "fixture": label,
