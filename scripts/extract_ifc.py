@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-import sys
-import os
 import ifcopenshell
 import ifcopenshell.geom
 import ifcopenshell.util.element
-import json
-from openpyxl import Workbook
+import json, re, os
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from collections import Counter, defaultdict
 
-# CLI: python extract_ifc.py <input.ifc> <output.xlsx>
+IFC_PATH = "/sessions/focused-exciting-ride/mnt/TALO IFC sekisan/ie4d1_2023.ifc"
+OUTPUT_PATH = "/sessions/focused-exciting-ride/mnt/TALO IFC sekisan/部材一覧_ie4d1.xlsx"
+
+# キット積算テンプレート（空ならOUTPUT_PATHと同じフォルダの「キット積算・価格計算.xlsx」を自動検索）
+KIT_TEMPLATE = ""
+KIT_OUTPUT   = ""   # 空なら「キット積算_<モデル名>.xlsx」を自動生成
 
 TYPE_NAMES = {
     "IfcWall": "壁", "IfcWallStandardCase": "壁",
@@ -250,15 +253,7 @@ def extract_key_props(psets, ifc_type):
     }
 
 def main():
-    if len(sys.argv) >= 3:
-        IFC_PATH = sys.argv[1]
-        OUTPUT_PATH = sys.argv[2]
-    else:
-        print("Usage: python extract_ifc.py <input.ifc> <output.xlsx>")
-        sys.exit(1)
-    
-    model_name = os.path.splitext(os.path.basename(IFC_PATH))[0]
-    print(f"IFC読み込み中... {IFC_PATH}")
+    print("IFC読み込み中...")
     ifc_file = ifcopenshell.open(IFC_PATH)
     target_types = [t for t in TYPE_NAMES.keys() if t not in SKIP_TYPES]
     all_elements = []
@@ -653,6 +648,278 @@ def main():
     for mname, stats in sorted_markers:
         sizes = ", ".join(sorted(stats["sizes"]))
         print(f"  {mname:16s} {stats['category']:4s} ×{stats['count']}  {stats['maker']:8s} {sizes}")
+
+    # ---------- キット積算 Excel 自動生成 ----------
+    kit_path = generate_kit_estimate(all_elements, marker_stats, summary_rows)
+    if kit_path:
+        print(f"\nキット積算Excel: {kit_path}")
+
+
+# ============================================================
+# キット積算・価格計算 Excel 自動入力
+# ============================================================
+
+# カスタムシートの行マッピング（F列に数量を書き込む行番号）
+KIT_ROW_MAP = {
+    'log_wall_m2':    10,   # ログ壁（LogWall）[m2]
+    'floor1f_m2':     11,   # 床板1F（FloorBoard 1F）[m2]
+    'floor2f_m2':     12,   # 床板2F（FloorBoard 2F）[m2]
+    'ceil1f_m2':      13,   # 天井板1F（CeilingPanel 1F）[m2]
+    'ceil2f_m2':      14,   # 天井板2F（CeilingPanel 2F）[m2]
+    'beam_m3':        15,   # 集成梁（LaminatedBeam）[m3]
+    'panel_m2':       16,   # パネル（LogPanel）[m2]
+    'terrace_m2':     21,   # テラス（Terrace）[m2]
+    'euro_door_cnt':  22,   # FINドア（EURO Door）[本]
+}
+KIT_VMW_START, KIT_VMW_END       = 44, 79
+KIT_NAGAI_START, KIT_NAGAI_END   = 84, 102
+KIT_VELUX_START, KIT_VELUX_END   = 107, 115
+KIT_COL_F = 6  # F列
+
+# VMSD-1 → 1810x2019 のような特殊マッピング
+_VMSD_MAP = {'VMSD-1': '1810X2019', 'VMSD-2': '2419X2019'}
+
+
+def _normalize_mk(text):
+    """マーカー正規化"""
+    return re.sub(r'\s+', '', str(text)).upper().strip() if text else ''
+
+
+def _extract_base_code(label):
+    """Excel品番ラベルから品番ベースコード抽出（サイズ情報除去）"""
+    s = str(label).strip()
+    s = re.sub(r'\s*\(\d+[xX×]\d+\)\s*', ' ', s)
+    s = re.sub(r'\s+\d+幅$', '', s)
+    return _normalize_mk(s)
+
+
+def _build_item_map(ws, r_start, r_end):
+    """品番→行番号マッピング: (exact_map, base_map)"""
+    exact, base = {}, defaultdict(list)
+    for r in range(r_start, r_end + 1):
+        label = ws.cell(r, 2).value
+        if label:
+            ls = str(label).strip()
+            exact[_normalize_mk(ls)] = r
+            base[_extract_base_code(ls)].append(r)
+    return exact, base
+
+
+def _match_row(marker, exact, base):
+    """マーカー→行番号マッチング"""
+    mk = _normalize_mk(marker)
+    if not mk:
+        return None
+    # 完全一致
+    if mk in exact:
+        return exact[mk]
+    # VMSD特殊
+    if mk in _VMSD_MAP:
+        sz = _VMSD_MAP[mk]
+        for k, r in exact.items():
+            if 'VMSD' in k and sz in k:
+                return r
+    # ベースコード一致
+    if mk in base:
+        rows = base[mk]
+        if len(rows) == 1:
+            return rows[0]
+        for r in rows:
+            for k, v in exact.items():
+                if v == r and '(LF-3)' not in k.upper() and '幅' not in k:
+                    return r
+        return rows[0]
+    # 先頭一致
+    for k, r in exact.items():
+        if k.startswith(mk + '(') or k.startswith(mk + ' '):
+            return r
+    # 部分一致
+    for k, r in exact.items():
+        if mk and len(mk) >= 4 and mk == k[:len(mk)]:
+            return r
+    return None
+
+
+def _collect_kit_quantities(all_elements, marker_stats):
+    """all_elements からキット積算用の数量を収集"""
+    q = {
+        'log_wall_m2': 0.0, 'floor1f_m2': 0.0, 'floor2f_m2': 0.0,
+        'ceil1f_m2': 0.0, 'ceil2f_m2': 0.0, 'beam_m3': 0.0,
+        'panel_m2': 0.0, 'terrace_m2': 0.0, 'euro_door_cnt': 0,
+    }
+
+    # ログ壁面積
+    for e in all_elements:
+        if e["部材分類"] == "ログ壁":
+            a = e.get("面積(m²)")
+            if isinstance(a, (int, float)):
+                q['log_wall_m2'] += a
+
+    # 間仕切壁 パネル面積
+    for e in all_elements:
+        if e["部材分類"] == "間仕切壁":
+            a = e.get("パネル面積(m²)")
+            if isinstance(a, (int, float)):
+                q['panel_m2'] += a
+
+    # 床（1F/2F/テラス/バルコニー）
+    has_2f = False
+    for e in all_elements:
+        cat = e["部材分類"]
+        a = e.get("面積(m²)")
+        if not isinstance(a, (int, float)):
+            continue
+        if cat == "1F床":
+            q['floor1f_m2'] += a
+        elif cat == "2F床":
+            q['floor2f_m2'] += a
+            has_2f = True
+        elif cat == "テラス":
+            q['terrace_m2'] += a
+
+    # 梁体積
+    for e in all_elements:
+        if e["部材分類"] == "梁":
+            v = e.get("体積(m³)")
+            if isinstance(v, (int, float)):
+                q['beam_m3'] += v
+
+    # 屋根本体面積 → 天井板推定
+    roof_body_area = 0.0
+    for e in all_elements:
+        if e["部材分類"] == "屋根":
+            tn = e.get("型式名") or ""
+            if "破風" not in tn and "鼻隠" not in tn:
+                a = e.get("面積(m²)")
+                if isinstance(a, (int, float)):
+                    roof_body_area += a
+
+    if has_2f:
+        q['ceil1f_m2'] = q['floor2f_m2']
+        q['ceil2f_m2'] = roof_body_area
+    else:
+        q['ceil1f_m2'] = roof_body_area
+        q['ceil2f_m2'] = 0.0
+
+    # ドア・窓マーカー別カウント
+    door_window_counts = {}
+    for mname, stats in marker_stats.items():
+        cat = stats.get("category", "")
+        if cat in ("ドア", "窓"):
+            door_window_counts[re.sub(r'\s+', '', mname)] = stats["count"]
+            if mname.upper().startswith("EURO"):
+                q['euro_door_cnt'] += stats["count"]
+
+    q['door_window_counts'] = door_window_counts
+
+    # 丸め
+    for k in ['log_wall_m2', 'floor1f_m2', 'floor2f_m2', 'ceil1f_m2', 'ceil2f_m2',
+              'beam_m3', 'panel_m2', 'terrace_m2']:
+        q[k] = round(q[k], 2)
+
+    return q
+
+
+def generate_kit_estimate(all_elements, marker_stats, summary_rows):
+    """キット積算・価格計算 Excel を自動生成。成功時はパスを返す。"""
+    out_dir = os.path.dirname(os.path.abspath(OUTPUT_PATH))
+    model_name = os.path.splitext(os.path.basename(OUTPUT_PATH))[0].replace("部材一覧_", "")
+
+    # テンプレート検索: KIT_TEMPLATE → OUTPUT_PATHフォルダ → IFC_PATHフォルダ
+    template = KIT_TEMPLATE
+    if not template:
+        for d in [out_dir, os.path.dirname(os.path.abspath(IFC_PATH))]:
+            cand = os.path.join(d, "キット積算・価格計算.xlsx")
+            if os.path.exists(cand):
+                template = cand
+                break
+    kit_out  = KIT_OUTPUT   or os.path.join(out_dir, f"キット積算_{model_name}.xlsx")
+
+    if not template or not os.path.exists(template):
+        print(f"\n⚠ キット積算テンプレートが見つかりません")
+        print("  「キット積算・価格計算.xlsx」をIFCファイルと同じフォルダに置いてください")
+        print("  キット積算Excelの自動生成をスキップします")
+        return None
+
+    print(f"\n=== キット積算 Excel 生成 ===")
+
+    # 数量収集
+    q = _collect_kit_quantities(all_elements, marker_stats)
+
+    # テンプレート読み込み
+    wb = load_workbook(template)
+    ws_name = '積算入力（カスタム）'
+    if ws_name not in wb.sheetnames:
+        print(f"  ERROR: シート '{ws_name}' が見つかりません")
+        return None
+    ws = wb[ws_name]
+
+    # スタイル
+    inp_fill = PatternFill("solid", start_color="FFFDE7", end_color="FFFDE7")
+    inp_font = Font(name='Arial', size=10, bold=True, color="1565C0")
+    inp_align = Alignment(horizontal='right', vertical='center')
+
+    def write_val(row, col, value):
+        c = ws.cell(row=row, column=col)
+        c.value = value
+        c.fill = inp_fill
+        c.font = inp_font
+        c.alignment = inp_align
+
+    # 材料数量書き込み
+    for key, row in KIT_ROW_MAP.items():
+        val = q.get(key, 0)
+        if val and val > 0:
+            write_val(row, KIT_COL_F, val)
+            label = ws.cell(row, 2).value or key
+            print(f"  {label[:30]:30s}: {val}")
+
+    # VMW / Nagai / VELUX 書き込み
+    dwc = q.get('door_window_counts', {})
+    if dwc:
+        vmw_ex, vmw_bs = _build_item_map(ws, KIT_VMW_START, KIT_VMW_END)
+        nag_ex, nag_bs = _build_item_map(ws, KIT_NAGAI_START, KIT_NAGAI_END)
+        vlx_ex, vlx_bs = _build_item_map(ws, KIT_VELUX_START, KIT_VELUX_END)
+
+        unmatched = []
+        for marker, count in sorted(dwc.items()):
+            mu = marker.upper()
+            if mu.startswith('EURO'):
+                continue
+
+            matched = False
+            if any(k in mu for k in ['VMW', 'VMSD', 'MTF']):
+                r = _match_row(marker, vmw_ex, vmw_bs)
+                if r:
+                    write_val(r, KIT_COL_F, count)
+                    print(f"  VMW  {ws.cell(r,2).value or marker:30s}: {count}")
+                    matched = True
+            elif any(k in mu for k in ['NV', 'NVS', 'NW', 'NHW']):
+                r = _match_row(marker, nag_ex, nag_bs)
+                if r:
+                    write_val(r, KIT_COL_F, count)
+                    print(f"  Nagai {ws.cell(r,2).value or marker:30s}: {count}")
+                    matched = True
+            elif 'VELUX' in mu:
+                r = _match_row(marker, vlx_ex, vlx_bs)
+                if r:
+                    write_val(r, KIT_COL_F, count)
+                    print(f"  VELUX {ws.cell(r,2).value or marker:30s}: {count}")
+                    matched = True
+
+            if not matched:
+                unmatched.append(f"{marker} x{count}")
+
+        if unmatched:
+            print(f"  ⚠ マッチなし: {', '.join(unmatched)}")
+
+    # プロジェクト名
+    ws.cell(5, 3).value = model_name
+
+    wb.save(kit_out)
+    print(f"  ✓ 保存: {kit_out}")
+    return kit_out
+
 
 if __name__ == "__main__":
     main()
