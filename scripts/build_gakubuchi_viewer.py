@@ -266,7 +266,7 @@ def extract_meshes(ifc_file):
         "IfcWall": "壁", "IfcWallStandardCase": "壁",
         "IfcDoor": "ドア", "IfcWindow": "窓",
         "IfcBeam": "梁", "IfcColumn": "柱",
-        "IfcSlab": "1F床", "IfcRailing": "手摺",
+        "IfcSlab": "床", "IfcRailing": "手摺",
         "IfcRoof": "屋根", "IfcStair": "階段",
         "IfcMember": "部材",
     }
@@ -298,6 +298,13 @@ def extract_meshes(ifc_file):
             cat = type_map.get(ifc_type, "")
             if not cat:
                 continue
+            # IfcSlab: PredefinedType=ROOF → 屋根, それ以外 → 床
+            if ifc_type == "IfcSlab":
+                pt = getattr(element, "PredefinedType", None) or ""
+                if pt == "ROOF":
+                    cat = "屋根"
+                else:
+                    cat = "床"
             # 天窓は専用カテゴリ
             if element.id() in skylight_ids:
                 cat = "天窓"
@@ -609,7 +616,7 @@ const FRAME_COLORS={{"額縁":0xff4444,"額縁受け":0x44ff44,"T-bar":0x4488ff,
 const FRAME_CSS={{"額縁":"#ff4444","額縁受け":"#44ff44","T-bar":"#4488ff","霧除け":"#ffaa00","木口":"#ff44ff"}};
 const MESH_CSS={{
   "壁":"#cc7733","ドア":"#5588cc","窓":"#5588cc","梁":"#ddaa22",
-  "柱":"#cc8844","1F床":"#ddbb77","手摺":"#888888","屋根":"#cc3333",
+  "柱":"#cc8844","床":"#ddbb77","手摺":"#888888","屋根":"#cc3333",
   "天窓":"#66aaff","部材":"#999999","階段":"#bbaa88"
 }};
 const HIDDEN_CATS={{"屋根":true}};
