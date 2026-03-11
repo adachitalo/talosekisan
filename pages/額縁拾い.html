@@ -405,7 +405,6 @@ function renderSelected() {
     const isPartition = (s.wall === 'partition');
     const wallTag = `<span class="tag-toggle ${isPartition?'on':'off'}" style="${isPartition?'background:var(--accent3);border-color:var(--accent3)':''}" onclick="toggleType(${i},'__wall__')" title="クリックで切替">間仕切壁</span>`;
 
-    const pieceCnt = countPiecesForItem(s);
     return `<div class="selected-item">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
         <strong>${esc(s.p)}</strong>
@@ -415,7 +414,7 @@ function renderSelected() {
           <button class="btn btn-sm" onclick="removeItem(${i})">×</button>
         </span>
       </div>
-      <div>${frameTag} ${extraTags} ${wallTag} <span style="color:var(--muted);font-size:11px;margin-left:4px">${pieceCnt}本/個 × ${s.qty} = ${pieceCnt*s.qty}本</span></div>
+      <div>${frameTag} ${extraTags} ${wallTag}</div>
     </div>`;
   }).join('');
   // Show total preview
