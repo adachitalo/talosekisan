@@ -831,6 +831,37 @@ def main():
             print(f"  {k}: {v:.2f}m")
             total += v
     print(f"  合計: {total:.2f}m")
+
+    # === JSON集計出力（部材一覧Excel統合用） ===
+    json_path = os.path.splitext(output_path)[0] + "_summary.json"
+    summary = {
+        "tool": "額縁拾い",
+        "model": model_name,
+        "type_totals": {k: round(v, 2) for k, v in type_totals.items()},
+        "grand_total": round(total, 2),
+        "fixtures": [
+            {
+                "label": fi["label"],
+                "ftype": fi["ftype"],
+                "w_mm": fi["w_mm"],
+                "h_mm": fi["h_mm"],
+                "frame_w": fi["frame_w"],
+                "frame_h": fi["frame_h"],
+            }
+            for fi in fixtures_info
+        ],
+        "lines": [
+            {
+                "kind": f["kind"],
+                "fixture": f["fixture"],
+                "length_mm": f["length"],
+            }
+            for f in frames
+        ],
+    }
+    with open(json_path, 'w', encoding='utf-8') as f_json:
+        json.dump(summary, f_json, ensure_ascii=False, indent=2)
+    print(f"JSON集計: {json_path}")
     print("\nSuccess!")
 
 

@@ -1247,6 +1247,31 @@ def main():
         f.write(html)
     print(f"\n出力: {OUTPUT_HTML}")
 
+    # === JSON集計出力（部材一覧Excel統合用） ===
+    json_path = os.path.splitext(OUTPUT_HTML)[0] + "_summary.json"
+    summary = {
+        "tool": "廻り縁拾い",
+        "model": ifc_basename,
+        "floor_totals": {fn: round(total_by_floor[fn], 2) for fn in total_by_floor},
+        "type_totals": {mt: round(total_by_type[mt], 2) for mt in total_by_type},
+        "grand_total": round(sum(total_by_type.values()), 2),
+        "lines": [
+            {
+                "floor": m["floor"],
+                "molding_type": m.get("molding_type", ""),
+                "cat": m.get("cat", ""),
+                "type": m.get("type", ""),
+                "length_m": m["length_m"],
+                "slope_side": m.get("slope_side", ""),
+                "beam_name": m.get("beam_name", ""),
+            }
+            for m in molding_lines
+        ],
+    }
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+    print(f"JSON集計: {json_path}")
+
 
 def generate_html(meshes_json, molding_json, colors_json,
                   totals_json, type_totals_json, title="廻り縁拾い"):

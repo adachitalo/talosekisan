@@ -125,6 +125,12 @@ jobs:
               wait $PID3 || echo "::warning::部材一覧Excel失敗: $BASENAME"
               wait $PID4 || echo "::warning::額縁拾い失敗: $BASENAME"
 
+              # 廻り縁・巾木・額縁の集計JSONを部材一覧Excelに統合
+              if [ -f "output/buzai_${BASENAME}.xlsx" ]; then
+                python scripts/add_sheets_to_excel.py "output/buzai_${BASENAME}.xlsx" || \
+                  echo "::warning::Excel統合失敗: $BASENAME"
+              fi
+
             done
           else
             echo "No IFC files to process (using cached outputs)"
