@@ -329,6 +329,16 @@ function removeItem(idx) {
   renderSelected();
 }
 
+function splitItem(idx) {
+  const item = selectedItems[idx];
+  if(item.qty <= 1) return;
+  item.qty -= 1;
+  // 新しいエントリを直後に挿入（独立した設定を持つ）
+  const newItem = {p:item.p, h:item.h, w:item.w, t:[...item.t], qty:1, wall:item.wall||'log'};
+  selectedItems.splice(idx + 1, 0, newItem);
+  renderSelected();
+}
+
 function clearSelected() {
   selectedItems = [];
   renderSelected();
@@ -411,6 +421,7 @@ function renderSelected() {
         <span style="color:var(--muted);font-size:11px">${s.h}×${s.w}</span>
         <span style="margin-left:auto;display:flex;align-items:center;gap:4px">
           <input type="number" min="1" value="${s.qty}" style="width:45px" onchange="selectedItems[${i}].qty=parseInt(this.value)||1;renderSelected()">
+          ${s.qty > 1 ? `<button class="btn btn-sm" style="font-size:10px;padding:2px 6px;background:#f59e0b;color:#fff;border-color:#f59e0b" onclick="splitItem(${i})" title="1本を分割して個別設定可能にする">分割</button>` : ''}
           <button class="btn btn-sm" onclick="removeItem(${i})">×</button>
         </span>
       </div>
