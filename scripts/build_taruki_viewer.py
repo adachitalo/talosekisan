@@ -35,7 +35,7 @@ CATEGORY_COLORS = {
     "手摺": "#708090", "階段": "#696969",
 }
 
-RAFTER_PITCH = 0.455  # 455mm
+RAFTER_PITCHES = [0.455, 0.303]  # 455mm, 303mm
 
 
 def classify_wall_full(name):
@@ -372,8 +372,9 @@ def detect_roof_openings(ifc, settings, rp):
 # 垂木配置
 ###############################################################################
 
-def place_rafters(rp, wall_edges, openings):
+def place_rafters(rp, wall_edges, openings, pitch=0.455):
     """垂木の配置位置（ridge_axis座標）を計算。
+    pitch: 垂木ピッチ（m）。デフォルト0.455(455mm)。
     Returns: list of {ridge_coord, reason, double}
     """
     ridge_axis = rp["ridge_axis"]
@@ -385,14 +386,13 @@ def place_rafters(rp, wall_edges, openings):
     rafter_positions[round(ridge_min, 4)] = {"reason": "屋根端部", "double": False}
     rafter_positions[round(ridge_max, 4)] = {"reason": "屋根端部", "double": False}
 
-    # 1. 基本ピッチ配置 (455mm)
-    # 基準点は軒先端から455mmピッチ
+    # 1. 基本ピッチ配置
     pos = ridge_min
     while pos <= ridge_max + 0.001:
         key = round(pos, 4)
         if key not in rafter_positions:
             rafter_positions[key] = {"reason": "基本ピッチ", "double": False}
-        pos += RAFTER_PITCH
+        pos += pitch
 
     # 2. ログ壁エッジに配置（垂木と平行な壁＝勾配方向に走る壁のみ）
     wall_ridge_edges = set()
@@ -488,7 +488,7 @@ def generate_rafter_lines(rafters, rp):
 
             # ダブル配置: 45mmオフセットした追加垂木（同じ理由名で集計統合）
             if double:
-                offset = RAFTER_PITCH * 0.1  # 約45mm
+                offset = 0.045  # 45mm
                 if ridge_axis == "x":
                     p_ridge2 = [rc + offset, ridge_y, rp["ridge_pos"]]
                     p_eave2 = [rc + offset, eave_y, eave_pos]
@@ -594,100 +594,119 @@ def main():
               f"ridge=[{op['ridge_min']:.3f},{op['ridge_max']:.3f}] "
               f"slope=[{op['slope_min']:.3f},{op['slope_max']:.3f}]")
 
-    # === Part 5: 垂木配置 ===
-    print("\n垂木配置計算中...")
-    rafters = place_rafters(rp, wall_edges, openings)
-    print(f"  配置位置: {len(rafters)}箇所")
+    # === Part 5-6: ピッチ別に垂木配置＆ライン生成 ===
+    all_pitch_data = {}  # pitch_mm → {rafters, rafter_lines, summary}
+    first_pitch = True
 
-    n_double = sum(1 for r in rafters if r["double"])
-    n_edge = sum(1 for r in rafters if "屋根端部" in r["reason"])
-    n_wall = sum(1 for r in rafters if "ログ壁" in r["reason"])
-    n_skylight = sum(1 for r in rafters if "天窓" in r["reason"])
-    n_chimney = sum(1 for r in rafters if "煙突" in r["reason"])
-    n_basic = len(rafters) - n_edge - n_wall - n_skylight - n_chimney
-    print(f"    基本ピッチ: {n_basic}箇所")
-    print(f"    屋根端部: {n_edge}箇所")
-    print(f"    ログ壁脇: {n_wall}箇所")
-    print(f"    天窓脇: {n_skylight}箇所")
-    print(f"    煙突脇: {n_chimney}箇所")
-    print(f"    ダブル配置: {n_double}箇所")
+    for pitch in RAFTER_PITCHES:
+        pitch_mm = int(pitch * 1000)
+        print(f"\n垂木配置計算中... (ピッチ: {pitch_mm}mm)")
+        rafters = place_rafters(rp, wall_edges, openings, pitch=pitch)
+        print(f"  配置位置: {len(rafters)}箇所")
 
-    # === Part 6: 垂木ライン生成 ===
-    print("\n垂木ライン生成中...")
-    rafter_lines = generate_rafter_lines(rafters, rp)
-    print(f"  垂木ライン: {len(rafter_lines)}本")
+        n_double = sum(1 for r in rafters if r["double"])
+        n_edge = sum(1 for r in rafters if "屋根端部" in r["reason"])
+        n_wall = sum(1 for r in rafters if "ログ壁" in r["reason"])
+        n_skylight = sum(1 for r in rafters if "天窓" in r["reason"])
+        n_chimney = sum(1 for r in rafters if "煙突" in r["reason"])
+        n_basic = len(rafters) - n_edge - n_wall - n_skylight - n_chimney
+        if first_pitch:
+            print(f"    基本ピッチ: {n_basic}箇所")
+            print(f"    屋根端部: {n_edge}箇所")
+            print(f"    ログ壁脇: {n_wall}箇所")
+            print(f"    天窓脇: {n_skylight}箇所")
+            print(f"    煙突脇: {n_chimney}箇所")
+            print(f"    ダブル配置: {n_double}箇所")
 
-    # 集計
-    total_count = len(rafter_lines)
-    total_length = sum(r["length_m"] for r in rafter_lines)
-    # 片面あたりの垂木長（全て同じ勾配面なので共通）
-    single_length = rafter_lines[0]["length_m"] if rafter_lines else 0
+        rafter_lines = generate_rafter_lines(rafters, rp)
+        print(f"  垂木ライン: {len(rafter_lines)}本")
 
-    # 理由別集計
-    count_by_reason = defaultdict(int)
-    length_by_reason = defaultdict(float)
-    for r in rafter_lines:
-        count_by_reason[r["reason"]] += 1
-        length_by_reason[r["reason"]] += r["length_m"]
+        total_count = len(rafter_lines)
+        total_length = sum(r["length_m"] for r in rafter_lines)
+        single_length = rafter_lines[0]["length_m"] if rafter_lines else 0
 
-    print(f"\n=== 垂木積算 ===")
-    print(f"  垂木1本の長さ（勾配長）: {single_length:.3f}m")
-    print(f"  総本数: {total_count}本")
-    print(f"  総長さ: {total_length:.2f}m")
-    print(f"\n  理由別:")
-    for reason in sorted(count_by_reason.keys()):
-        print(f"    {reason}: {count_by_reason[reason]}本 / {length_by_reason[reason]:.2f}m")
+        count_by_reason = defaultdict(int)
+        length_by_reason = defaultdict(float)
+        for r in rafter_lines:
+            count_by_reason[r["reason"]] += 1
+            length_by_reason[r["reason"]] += r["length_m"]
 
-    # 面別集計
-    count_front = sum(1 for r in rafter_lines if r["side"] == "前面")
-    count_back = sum(1 for r in rafter_lines if r["side"] == "背面")
-    print(f"\n  前面: {count_front}本")
-    print(f"  背面: {count_back}本")
+        count_front = sum(1 for r in rafter_lines if r["side"] == "前面")
+        count_back = sum(1 for r in rafter_lines if r["side"] == "背面")
+
+        if first_pitch:
+            print(f"\n=== 垂木積算 ({pitch_mm}mm) ===")
+            print(f"  垂木1本の長さ（勾配長）: {single_length:.3f}m")
+            print(f"  総本数: {total_count}本")
+            print(f"  総長さ: {total_length:.2f}m")
+            print(f"\n  理由別:")
+            for reason in sorted(count_by_reason.keys()):
+                print(f"    {reason}: {count_by_reason[reason]}本 / {length_by_reason[reason]:.2f}m")
+            print(f"\n  前面: {count_front}本")
+            print(f"  背面: {count_back}本")
+
+        summary_info = {
+            "total_count": total_count,
+            "total_length": round(total_length, 2),
+            "single_length": round(single_length, 3),
+            "count_by_reason": {k: v for k, v in count_by_reason.items()},
+            "length_by_reason": {k: round(v, 2) for k, v in length_by_reason.items()},
+            "count_front": count_front,
+            "count_back": count_back,
+            "pitch": pitch_mm,
+        }
+
+        all_pitch_data[pitch_mm] = {
+            "rafters": rafters,
+            "rafter_lines": rafter_lines,
+            "summary": summary_info,
+        }
+        first_pitch = False
 
     # === HTML出力 ===
+    default_pitch = int(RAFTER_PITCHES[0] * 1000)
     meshes_json = json.dumps(meshes, ensure_ascii=False)
-    rafter_json = json.dumps(rafter_lines, ensure_ascii=False)
     colors_json = json.dumps(CATEGORY_COLORS, ensure_ascii=False)
 
-    summary_info = {
-        "total_count": total_count,
-        "total_length": round(total_length, 2),
-        "single_length": round(single_length, 3),
-        "count_by_reason": {k: v for k, v in count_by_reason.items()},
-        "length_by_reason": {k: round(v, 2) for k, v in length_by_reason.items()},
-        "count_front": count_front,
-        "count_back": count_back,
-        "pitch": RAFTER_PITCH * 1000,
-    }
-    summary_json = json.dumps(summary_info, ensure_ascii=False)
+    # ピッチ別データをまとめたオブジェクト
+    pitch_data_for_html = {}
+    for pitch_mm, pdata in all_pitch_data.items():
+        pitch_data_for_html[pitch_mm] = {
+            "rafters": pdata["rafter_lines"],
+            "summary": pdata["summary"],
+        }
+    pitch_data_json = json.dumps(pitch_data_for_html, ensure_ascii=False)
+    pitches_json = json.dumps([int(p * 1000) for p in RAFTER_PITCHES])
 
-    html = generate_html(meshes_json, rafter_json, colors_json, summary_json, model_name)
+    html = generate_html(meshes_json, pitch_data_json, pitches_json,
+                         default_pitch, colors_json, model_name)
 
     os.makedirs(os.path.dirname(OUTPUT_HTML) or ".", exist_ok=True)
     with open(OUTPUT_HTML, 'w', encoding='utf-8') as f:
         f.write(html)
     print(f"\n出力: {OUTPUT_HTML}")
 
-    # === JSON集計出力 ===
+    # === JSON集計出力（デフォルトピッチ） ===
     json_path = os.path.splitext(OUTPUT_HTML)[0] + "_summary.json"
+    dp = all_pitch_data[default_pitch]
     summary_out = {
         "tool": "垂木拾い",
         "model": model_name,
-        "pitch_mm": RAFTER_PITCH * 1000,
-        "single_length_m": round(single_length, 3),
-        "total_count": total_count,
-        "total_length_m": round(total_length, 2),
-        "count_front": count_front,
-        "count_back": count_back,
-        "count_by_reason": dict(count_by_reason),
-        "length_by_reason": {k: round(v, 2) for k, v in length_by_reason.items()},
+        "pitch_mm": default_pitch,
+        "single_length_m": dp["summary"]["single_length"],
+        "total_count": dp["summary"]["total_count"],
+        "total_length_m": dp["summary"]["total_length"],
+        "count_front": dp["summary"]["count_front"],
+        "count_back": dp["summary"]["count_back"],
+        "count_by_reason": dp["summary"]["count_by_reason"],
+        "length_by_reason": dp["summary"]["length_by_reason"],
         "rafters": [
             {
                 "ridge_coord": r["ridge_coord"],
                 "reason": r["reason"],
                 "double": r["double"],
             }
-            for r in rafters
+            for r in dp["rafters"]
         ],
     }
     with open(json_path, 'w', encoding='utf-8') as f:
@@ -695,7 +714,8 @@ def main():
     print(f"JSON集計: {json_path}")
 
 
-def generate_html(meshes_json, rafter_json, colors_json, summary_json, model_name=""):
+def generate_html(meshes_json, pitch_data_json, pitches_json,
+                   default_pitch, colors_json, model_name=""):
     return f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -714,11 +734,13 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 .cb {{ display:inline-block; width:14px; height:14px; border-radius:3px; margin-right:6px; vertical-align:middle; }}
 #taruki-info {{ position:fixed; bottom:10px; left:10px; color:#fff; background:rgba(0,0,0,0.85);
   padding:14px 18px; border-radius:8px; font-size:13px; z-index:100; line-height:1.6; max-width:400px; }}
-#controls {{ position:fixed; bottom:10px; right:10px; z-index:100; }}
+#controls {{ position:fixed; bottom:10px; right:10px; z-index:100; display:flex; flex-wrap:wrap; gap:4px; align-items:center; }}
 #controls button {{ background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3);
-  padding:8px 14px; border-radius:6px; cursor:pointer; margin:2px; font-size:12px; }}
+  padding:8px 14px; border-radius:6px; cursor:pointer; font-size:12px; }}
 #controls button:hover {{ background:rgba(255,255,255,0.3); }}
 #controls button.active {{ background:rgba(255,160,0,0.5); border-color:#ffa500; }}
+#pitch-group {{ display:flex; gap:2px; margin-right:8px; }}
+#pitch-group button {{ padding:8px 12px; }}
 </style>
 </head>
 <body>
@@ -730,6 +752,7 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 <div id="taruki-info"></div>
 <div id="legend"></div>
 <div id="controls">
+  <div id="pitch-group"></div>
   <button id="btn-taruki" class="active" onclick="toggleTaruki()">垂木表示</button>
   <button id="btn-building" class="active" onclick="toggleBuilding()">建物表示</button>
   <button onclick="resetCam()">リセット</button>
@@ -738,9 +761,12 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 const MESHES={meshes_json};
-const RAFTERS={rafter_json};
+const PITCH_DATA={pitch_data_json};
+const PITCHES={pitches_json};
+const DEFAULT_PITCH={default_pitch};
 const COLORS={colors_json};
-const SUMMARY={summary_json};
+
+let currentPitch=DEFAULT_PITCH;
 
 const REASON_COLORS = {{
   "基本ピッチ": 0xffa500,
@@ -799,35 +825,64 @@ catGroups[m.cat].add(mesh);allMeshes.push(mesh);bbox.expandByObject(mesh);
 }});
 scene.add(buildingGroup);
 
-// 垂木ライン描画
+// 垂木ライン描画（ピッチ切り替え対応）
 const tarukiGroup=new THREE.Group();
-RAFTERS.forEach(r=>{{
-const color=REASON_COLORS[r.reason]||0xffa500;
-const pts=[new THREE.Vector3(...r.seg[0]),new THREE.Vector3(...r.seg[1])];
-const g=new THREE.BufferGeometry().setFromPoints(pts);
-const mat=new THREE.LineBasicMaterial({{color,linewidth:2}});
-const line=new THREE.Line(g,mat);
-line.userData={{reason:r.reason,length:r.length_m,side:r.side,double:r.double}};
-tarukiGroup.add(line);
-}});
 scene.add(tarukiGroup);
 
-// 集計表示
-let infoHtml='<b style="font-size:14px;">垂木積算</b><br><br>';
-infoHtml+=`ピッチ: ${{SUMMARY.pitch}}mm<br>`;
-infoHtml+=`垂木長さ（1本）: ${{SUMMARY.single_length}}m<br><br>`;
-infoHtml+=`<b>総本数: ${{SUMMARY.total_count}}本</b><br>`;
-infoHtml+=`総長さ: ${{SUMMARY.total_length}}m<br><br>`;
-infoHtml+=`前面: ${{SUMMARY.count_front}}本<br>`;
-infoHtml+=`背面: ${{SUMMARY.count_back}}本<br><br>`;
-infoHtml+='<b>理由別:</b><br>';
-for(const [reason, count] of Object.entries(SUMMARY.count_by_reason)){{
-  const color=REASON_COLORS[reason]||0xffa500;
-  const hex='#'+color.toString(16).padStart(6,'0');
-  const len=SUMMARY.length_by_reason[reason]||0;
-  infoHtml+=`<span style="color:${{hex}}">━━</span> ${{reason}}: ${{count}}本 / ${{len}}m<br>`;
+function buildTarukiLines(pitchMm){{
+  // 既存ラインをクリア
+  while(tarukiGroup.children.length>0) tarukiGroup.remove(tarukiGroup.children[0]);
+  const pd=PITCH_DATA[pitchMm];
+  if(!pd) return;
+  pd.rafters.forEach(r=>{{
+    const color=REASON_COLORS[r.reason]||0xffa500;
+    const pts=[new THREE.Vector3(...r.seg[0]),new THREE.Vector3(...r.seg[1])];
+    const g=new THREE.BufferGeometry().setFromPoints(pts);
+    const mat=new THREE.LineBasicMaterial({{color,linewidth:2}});
+    const line=new THREE.Line(g,mat);
+    line.userData={{reason:r.reason,length:r.length_m,side:r.side,double:r.double}};
+    tarukiGroup.add(line);
+  }});
+  // 集計表示更新
+  const S=pd.summary;
+  let h='<b style="font-size:14px;">垂木積算</b><br><br>';
+  h+=`ピッチ: ${{S.pitch}}mm<br>`;
+  h+=`垂木長さ（1本）: ${{S.single_length}}m<br><br>`;
+  h+=`<b>総本数: ${{S.total_count}}本</b><br>`;
+  h+=`総長さ: ${{S.total_length}}m<br><br>`;
+  h+=`前面: ${{S.count_front}}本<br>`;
+  h+=`背面: ${{S.count_back}}本<br><br>`;
+  h+='<b>理由別:</b><br>';
+  for(const [reason, count] of Object.entries(S.count_by_reason)){{
+    const color=REASON_COLORS[reason]||0xffa500;
+    const hex='#'+color.toString(16).padStart(6,'0');
+    const len=S.length_by_reason[reason]||0;
+    h+=`<span style="color:${{hex}}">━━</span> ${{reason}}: ${{count}}本 / ${{len}}m<br>`;
+  }}
+  document.getElementById('taruki-info').innerHTML=h;
 }}
-document.getElementById('taruki-info').innerHTML=infoHtml;
+
+function switchPitch(pitchMm){{
+  currentPitch=pitchMm;
+  buildTarukiLines(pitchMm);
+  document.querySelectorAll('#pitch-group button').forEach(b=>{{
+    b.classList.toggle('active', parseInt(b.dataset.pitch)===pitchMm);
+  }});
+}}
+
+// ピッチ切り替えボタン生成
+const pg=document.getElementById('pitch-group');
+PITCHES.forEach(p=>{{
+  const b=document.createElement('button');
+  b.textContent=p+'mm';
+  b.dataset.pitch=p;
+  b.onclick=()=>switchPitch(p);
+  if(p===DEFAULT_PITCH) b.classList.add('active');
+  pg.appendChild(b);
+}});
+
+// 初期描画
+buildTarukiLines(DEFAULT_PITCH);
 
 const center=new THREE.Vector3();bbox.getCenter(center);
 const size=bbox.getSize(new THREE.Vector3());const maxDim=Math.max(size.x,size.y,size.z);
