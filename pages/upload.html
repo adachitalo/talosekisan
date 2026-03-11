@@ -400,7 +400,7 @@ async function readFileAsBase64(file) {
   });
 }
 
-async function waitForWorkflow(fileName, maxWait = 180000) {
+async function waitForWorkflow(fileName, maxWait = 600000) {
   const token = getToken();
   const startTime = Date.now();
 
@@ -434,7 +434,10 @@ async function waitForWorkflow(fileName, maxWait = 180000) {
       }
 
       const elapsed = Math.round((Date.now() - startTime) / 1000);
-      updateStatus(`🔨 IFC処理中... (${elapsed}秒経過)`, 70 + Math.min(25, elapsed / 2));
+      const mins = Math.floor(elapsed / 60);
+      const secs = elapsed % 60;
+      const timeStr = mins > 0 ? `${mins}分${secs}秒` : `${elapsed}秒`;
+      updateStatus(`🔨 IFC処理中... (${timeStr}経過)`, 70 + Math.min(25, elapsed / 6));
     } catch (e) {
       console.warn('Polling error:', e);
     }
