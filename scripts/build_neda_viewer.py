@@ -676,13 +676,30 @@ _pan(dx,dy){{const d=this.c.position.distanceTo(this.t)*0.001;const r=new THREE.
 const u=new THREE.Vector3().setFromMatrixColumn(this.c.matrix,1);const p=r.multiplyScalar(-dx*d).add(u.multiplyScalar(dy*d));
 this.c.position.add(p);this.t.add(p);this.c.lookAt(this.t);}}
 _zm(f){{const o=this.c.position.clone().sub(this.t);o.multiplyScalar(f);this.c.position.copy(this.t).add(o);this.c.lookAt(this.t);}}
-initSM(){{this._smId=null;const cn=e=>{{if(e.gamepad&&(e.gamepad.id.includes('SpaceMouse')||e.gamepad.id.includes('3Dconnexion')||e.gamepad.axes.length>=6))this._smId=e.gamepad.index;}};
-addEventListener('gamepadconnected',cn);addEventListener('gamepaddisconnected',e=>{{if(this._smId===e.gamepad.index)this._smId=null;}});
-for(const g of navigator.getGamepads())if(g&&(g.id.includes('SpaceMouse')||g.id.includes('3Dconnexion')||g.axes.length>=6)){{this._smId=g.index;break;}}}}
-pollSM(){{if(this._smId===null)return;const g=navigator.getGamepads()[this._smId];if(!g)return;const a=g.axes,dz=0.05;
-const tx=Math.abs(a[0])>dz?a[0]:0,ty=Math.abs(a[1])>dz?a[1]:0,tz=Math.abs(a[2])>dz?a[2]:0;
-const rx=Math.abs(a[3])>dz?a[3]:0,ry=Math.abs(a[4])>dz?a[4]:0;
-if(tx||tz)this._pan(tx*-8,tz*8);if(ty)this._zm(1+ty*0.02);if(rx||ry)this._rot(ry*-6,rx*-6);}}
+initSM(){{this._smDev=null;this._smV=new Float32Array(6);
+this._smBtn=document.createElement('button');this._smBtn.textContent='🎮 3D Mouse接続';
+this._smBtn.style.cssText='position:fixed;bottom:10px;right:10px;z-index:9999;background:#1565c0;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;opacity:0.85;';
+this._smBtn.addEventListener('click',async()=>{{
+try{{const devs=await navigator.hid.requestDevice({{filters:[{{vendorId:0x046d,productId:0xc626}}]}});
+if(!devs.length)return;const dev=devs[0];if(!dev.opened)await dev.open();this._smDev=dev;
+this._smBtn.textContent='✅ '+dev.productName;this._smBtn.style.background='#1b5e20';
+dev.addEventListener('inputreport',ev=>{{const d=ev.data,id=ev.reportId;
+if(id===1&&d.byteLength>=6){{this._smV[0]=d.getInt16(0,true);this._smV[1]=d.getInt16(2,true);this._smV[2]=d.getInt16(4,true);}}
+else if(id===2&&d.byteLength>=6){{this._smV[3]=d.getInt16(0,true);this._smV[4]=d.getInt16(2,true);this._smV[5]=d.getInt16(4,true);}}
+}});}}catch(e){{this._smBtn.textContent='❌ '+e.message;this._smBtn.style.background='#b71c1c';}}
+}});document.body.appendChild(this._smBtn);
+if(navigator.hid)navigator.hid.getDevices().then(devs=>{{const d=devs.find(d=>d.vendorId===0x046d&&d.productId===0xc626);
+if(d){{if(!d.opened)d.open().then(()=>this._setupHID(d));else this._setupHID(d);}}
+}});}}
+_setupHID(dev){{this._smDev=dev;this._smBtn.textContent='✅ '+dev.productName;this._smBtn.style.background='#1b5e20';
+dev.addEventListener('inputreport',ev=>{{const d=ev.data,id=ev.reportId;
+if(id===1&&d.byteLength>=6){{this._smV[0]=d.getInt16(0,true);this._smV[1]=d.getInt16(2,true);this._smV[2]=d.getInt16(4,true);}}
+else if(id===2&&d.byteLength>=6){{this._smV[3]=d.getInt16(0,true);this._smV[4]=d.getInt16(2,true);this._smV[5]=d.getInt16(4,true);}}
+}});}}
+pollSM(){{if(!this._smDev)return;const v=this._smV,dz=15;
+const tx=Math.abs(v[0])>dz?v[0]:0,ty=Math.abs(v[1])>dz?v[1]:0,tz=Math.abs(v[2])>dz?v[2]:0;
+const rx=Math.abs(v[3])>dz?v[3]:0,ry=Math.abs(v[4])>dz?v[4]:0;
+if(tx||tz)this._pan(tx*0.025,-tz*0.025);if(ty)this._zm(1+ty*0.00008);if(rx||ry)this._rot(-ry*0.018,rx*0.018);}}
 }}
 
 const buildingGroup=new THREE.Group();
