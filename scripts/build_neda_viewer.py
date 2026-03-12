@@ -669,13 +669,20 @@ else if(ev.touches.length===2){{this._st=3;td=Math.hypot(ev.touches[1].clientX-e
 e.addEventListener('touchmove',ev=>{{ev.preventDefault();if(this._st===1&&ev.touches.length===1){{const dx=ev.touches[0].clientX-this._sv.x,dy=ev.touches[0].clientY-this._sv.y;
 this._sv.set(ev.touches[0].clientX,ev.touches[0].clientY);this._rot(dx,dy);}}else if(this._st===3&&ev.touches.length===2){{
 const d=Math.hypot(ev.touches[1].clientX-ev.touches[0].clientX,ev.touches[1].clientY-ev.touches[0].clientY);this._zm(td/d);td=d;}}}},{{passive:false}});
-e.addEventListener('touchend',()=>{{this._st=0;}});}}
+e.addEventListener('touchend',()=>{{this._st=0;}});this.initSM();}}
 _rot(dx,dy){{const o=this.c.position.clone().sub(this.t);this.s.setFromVector3(o);this.s.theta-=dx*0.008;this.s.phi-=dy*0.008;
 this.s.phi=Math.max(0.01,Math.min(Math.PI-0.01,this.s.phi));o.setFromSpherical(this.s);this.c.position.copy(this.t).add(o);this.c.lookAt(this.t);}}
 _pan(dx,dy){{const d=this.c.position.distanceTo(this.t)*0.001;const r=new THREE.Vector3().setFromMatrixColumn(this.c.matrix,0);
 const u=new THREE.Vector3().setFromMatrixColumn(this.c.matrix,1);const p=r.multiplyScalar(-dx*d).add(u.multiplyScalar(dy*d));
 this.c.position.add(p);this.t.add(p);this.c.lookAt(this.t);}}
 _zm(f){{const o=this.c.position.clone().sub(this.t);o.multiplyScalar(f);this.c.position.copy(this.t).add(o);this.c.lookAt(this.t);}}
+initSM(){{this._smId=null;const cn=e=>{{if(e.gamepad&&(e.gamepad.id.includes('SpaceMouse')||e.gamepad.id.includes('3Dconnexion')||e.gamepad.axes.length>=6))this._smId=e.gamepad.index;}};
+addEventListener('gamepadconnected',cn);addEventListener('gamepaddisconnected',e=>{{if(this._smId===e.gamepad.index)this._smId=null;}});
+for(const g of navigator.getGamepads())if(g&&(g.id.includes('SpaceMouse')||g.id.includes('3Dconnexion')||g.axes.length>=6)){{this._smId=g.index;break;}}}}
+pollSM(){{if(this._smId===null)return;const g=navigator.getGamepads()[this._smId];if(!g)return;const a=g.axes,dz=0.05;
+const tx=Math.abs(a[0])>dz?a[0]:0,ty=Math.abs(a[1])>dz?a[1]:0,tz=Math.abs(a[2])>dz?a[2]:0;
+const rx=Math.abs(a[3])>dz?a[3]:0,ry=Math.abs(a[4])>dz?a[4]:0;
+if(tx||tz)this._pan(tx*-8,tz*8);if(ty)this._zm(1+ty*0.02);if(rx||ry)this._rot(ry*-6,rx*-6);}}
 }}
 
 const buildingGroup=new THREE.Group();
@@ -812,7 +819,7 @@ function toggleComp(){{showC=!showC;compGroup.visible=showC;document.getElementB
 function toggleBuilding(){{showB=!showB;buildingGroup.visible=showB;document.getElementById('btn-building').classList.toggle('active',showB);}}
 
 const grid=new THREE.GridHelper(20,40,0x444444,0x333333);grid.position.copy(center);grid.position.y=0;scene.add(grid);
-(function anim(){{requestAnimationFrame(anim);renderer.render(scene,camera);}})();
+(function anim(){{requestAnimationFrame(anim);controls.pollSM();renderer.render(scene,camera);}})();
 addEventListener('resize',()=>{{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);}});
 </script>
 </body>
