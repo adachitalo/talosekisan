@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>額縁拾い v5.0</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#f5f5f0;--card:#fff;--border:#ddd;--accent:#2563eb;--accent2:#059669;--accent3:#dc2626;--text:#1a1a1a;--muted:#666;--header:#1e293b}
+body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+header{background:var(--header);color:#fff;padding:12px 20px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100}
+header h1{font-size:18px;font-weight:600;white-space:nowrap}
+.tabs{display:flex;gap:4px}
+.tab{padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);transition:.2s;border:none}
+.tab.active{background:var(--accent);color:#fff}
+.tab:hover:not(.active){background:rgba(255,255,255,0.2)}
+.project-name{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px}
+.project-name input{background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.2);color:#fff;padding:6px 10px;border-radius:4px;font-size:13px;width:180px}
+.project-name input::placeholder{color:rgba(255,255,255,0.5)}
+main{max-width:1400px;margin:0 auto;padding:16px}
+.panel{display:none}
+.panel.active{display:block}
+/* Table styles */
+.card{background:var(--card);border-radius:8px;border:1px solid var(--border);overflow:hidden;margin-bottom:16px}
+.card-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;background:#fafafa}
+.card-header h2{font-size:15px;font-weight:600}
+.badge{background:var(--accent);color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.badge.green{background:var(--accent2)}
+.badge.red{background:var(--accent3)}
+table{width:100%;border-collapse:collapse}
+th{background:#f8f8f5;text-align:left;padding:8px 12px;font-size:12px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap;position:sticky;top:0}
+td{padding:7px 12px;border-bottom:1px solid #f0f0f0;font-size:13px}
+tr:hover td{background:#f5f8ff}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+/* Search & controls */
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
+.search{flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px}
+.btn{padding:7px 14px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:#fff;transition:.15s}
+.btn:hover{background:#f0f0f0}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-primary:hover{background:#1d4ed8}
+.btn-success{background:var(--accent2);color:#fff;border-color:var(--accent2)}
+.btn-success:hover{background:#047857}
+.btn-danger{background:var(--accent3);color:#fff;border-color:var(--accent3)}
+.btn-danger:hover{background:#b91c1c}
+.btn-sm{padding:4px 8px;font-size:12px}
+input[type=number]{width:60px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;text-align:center;font-size:13px}
+/* Selected items */
+.selected-list{max-height:55vh;overflow-y:auto}
+/* Summary boxes */
+.summary{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:12px}
+.summary-box{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:10px 14px}
+.summary-box .label{font-size:11px;color:var(--muted);margin-bottom:2px}
+.summary-box .value{font-size:20px;font-weight:700;color:var(--accent)}
+.summary-box .value.green{color:var(--accent2)}
+/* Wood cutting visualization */
+.material-bar{display:flex;height:32px;border-radius:4px;overflow:hidden;border:1px solid var(--border);margin:4px 0;position:relative}
+.material-bar .piece{display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;overflow:hidden;white-space:nowrap;padding:0 2px}
+.material-bar .rest{background:#e5e7eb;color:var(--muted);display:flex;align-items:center;justify-content:center;font-size:10px}
+.colors{--c0:#3b82f6;--c1:#10b981;--c2:#f59e0b;--c3:#ef4444;--c4:#8b5cf6;--c5:#06b6d4;--c6:#f97316;--c7:#ec4899}
+.type-dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px}
+/* Scrollable table wrapper */
+.table-wrap{max-height:50vh;overflow-y:auto}
+.flex-row{display:flex;gap:16px}
+.flex-row>*{flex:1}
+@media(max-width:768px){.flex-row{flex-direction:column}}
+.empty-state{padding:40px;text-align:center;color:var(--muted)}
+.tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;margin:1px;background:#f0f0f0;color:#555}
+.tag-toggle{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;margin:1px;cursor:pointer;border:1px solid var(--border);transition:.15s;user-select:none}
+.tag-toggle.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.tag-toggle.off{background:#f0f0f0;color:#bbb;border-color:#e0e0e0;text-decoration:line-through}
+.tag-toggle:hover{opacity:0.8}
+.selected-item{padding:8px 12px;border-bottom:1px solid #f0f0f0}
+.selected-item:last-child{border-bottom:none}
+.highlight{background:#fef3c7}
+/* PDF drop zone */
+.pdf-drop{border:2px dashed var(--border);border-radius:8px;padding:20px;text-align:center;margin-bottom:16px;background:#fafffe;transition:.2s;cursor:pointer;position:relative}
+.pdf-drop.dragover{border-color:var(--accent);background:#eff6ff;box-shadow:0 0 0 3px rgba(37,99,235,0.1)}
+.pdf-drop .drop-icon{font-size:28px;margin-bottom:4px;opacity:0.5}
+.pdf-drop .drop-text{font-size:13px;color:var(--muted)}
+.pdf-drop input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer}
+.pdf-result{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:12px}
+.pdf-result h3{font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.pdf-item{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px}
+.pdf-item:last-child{border-bottom:none}
+.pdf-item .match{color:var(--accent2);font-size:11px}
+.pdf-item .nomatch{color:var(--accent3);font-size:11px}
+.import-actions{display:flex;gap:8px;margin-top:12px;align-items:center}
+/* Print styles */
+@media print {
+  body{font-size:11px;background:#fff}
+  header,.tab,.pdf-drop,.controls,.btn,.panel:not(.print-target){display:none!important}
+  .panel.print-target{display:block!important}
+  .print-target .controls{display:none!important}
+  .summary{display:flex!important;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+  .summary-box{border:1px solid #ccc;padding:6px 10px;break-inside:avoid}
+  .card{break-inside:avoid;margin-bottom:8px;border:1px solid #ccc}
+  .card-header{background:#f0f0f0!important;padding:6px 10px}
+  .material-bar{height:24px;border:1px solid #999;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .material-bar .piece{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .material-bar .rest{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .type-dot{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .print-header{display:block!important;text-align:center;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #333}
+  .print-header h1{font-size:18px;margin-bottom:4px}
+  .print-header .print-meta{font-size:12px;color:#666}
+  .no-print-detail .kidori-detail{display:none!important}
+}
+.print-header{display:none}
+</style>
+</head>
+<body class="colors">
+<header>
+  <h1>額縁拾い</h1>
+  <div class="tabs">
+    <button class="tab active" onclick="showPanel(0)">1. 建具選択</button>
+    <button class="tab" onclick="showPanel(1)">2. 額縁拾い結果</button>
+    <button class="tab" onclick="showPanel(2)">3. 木取り計算</button>
+  </div>
+  <div class="project-name">
+    <span>物件名:</span>
+    <input id="projectName" placeholder="物件名を入力..." value="">
+  </div>
+</header>
+<main>
+<!-- Panel 1: Building Fitting Selection -->
+<div id="panel0" class="panel active">
+  <!-- PDF Import Zone -->
+  <div class="pdf-drop" id="pdfDrop" ondragover="event.preventDefault();this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="handlePdfDrop(event)">
+    <div class="drop-icon">📄</div>
+    <div class="drop-text">建具表PDFをドラッグ＆ドロップ または クリックで選択</div>
+    <input type="file" accept=".pdf" onchange="handlePdfFile(this.files[0])">
+  </div>
+  <div id="pdfResult" style="display:none"></div>
+
+  <div class="controls">
+    <input class="search" id="searchInput" placeholder="品番・寸法で検索..." oninput="filterTategu()">
+    <select id="typeFilter" class="btn" onchange="filterTategu()">
+      <option value="">全種別</option>
+      <option value="額縁4方,額縁受け,T-bar,霧除け">額縁4方+額縁受け+T-bar+霧除け</option>
+      <option value="額縁3方,額縁受け,T-bar">額縁3方+額縁受け+T-bar</option>
+      <option value="額縁3方,T-bar,木口">額縁3方+T-bar+木口</option>
+    </select>
+    <span style="color:var(--muted);font-size:12px" id="filterCount"></span>
+  </div>
+  <div class="flex-row">
+    <div style="flex:2">
+      <div class="card">
+        <div class="card-header">
+          <h2>建具マスタ</h2>
+          <span class="badge" id="masterCount">241件</span>
+        </div>
+        <div class="table-wrap" style="max-height:55vh">
+          <table>
+            <thead><tr><th>品番</th><th class="num">H(mm)</th><th class="num">W(mm)</th><th>種別</th><th>本数</th><th></th></tr></thead>
+            <tbody id="tateguBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div style="flex:2">
+      <div class="card">
+        <div class="card-header">
+          <h2>選択済み建具</h2>
+          <span class="badge green" id="selectedCount">0件</span>
+          <button class="btn btn-sm btn-danger" onclick="clearSelected()" style="margin-left:auto">全クリア</button>
+        </div>
+        <div class="selected-list" id="selectedList">
+          <div class="empty-state">建具を追加してください</div>
+        </div>
+      </div>
+      <button class="btn btn-primary" style="width:100%;padding:12px;font-size:15px;margin-top:8px" onclick="calcFrames()">
+        額縁拾い実行 →
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Panel 2: Frame Picking Results -->
+<div id="panel1" class="panel">
+  <div class="summary" id="frameSummary"></div>
+  <div class="flex-row">
+    <div style="flex:2">
+      <div class="card">
+        <div class="card-header">
+          <h2>額縁拾い詳細</h2>
+          <span class="badge" id="frameCount">0本</span>
+        </div>
+        <div class="table-wrap" style="max-height:60vh">
+          <table>
+            <thead><tr><th>品番</th><th>面</th><th>種別</th><th>部位</th><th class="num">長さ(mm)</th><th class="num">本数</th></tr></thead>
+            <tbody id="frameBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div style="flex:1">
+      <div class="card">
+        <div class="card-header"><h2>種別別集計</h2></div>
+        <div id="typeSummary"></div>
+      </div>
+      <button class="btn btn-success" style="width:100%;padding:12px;font-size:15px;margin-top:8px" onclick="calcKidori()">
+        木取り計算 →
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Panel 3: Wood Cutting -->
+<div id="panel2" class="panel">
+  <div class="controls">
+    <label>定尺(mm): <input type="number" id="materialLength" value="3930" style="width:80px"></label>
+    <label>鋸代(mm): <input type="number" id="sawLoss" value="5" style="width:50px"></label>
+    <button class="btn btn-success" onclick="calcKidori()">再計算</button>
+    <label style="margin-left:16px;font-size:13px;display:flex;align-items:center;gap:4px">
+      <input type="checkbox" id="printDetail" checked> 木取り根拠を含める
+    </label>
+    <button class="btn btn-primary" onclick="printKidori()" style="margin-left:auto">🖨 印刷</button>
+  </div>
+  <div class="summary" id="kidoriSummary"></div>
+  <div id="kidoriResult"></div>
+</div>
+</main>
+
+<script>
+// ========== DATA ==========
+const TATEGU_MASTER = [{"p":"EURO-1","h":2090,"w":890,"t":["額縁3方","額縁受け","T-bar","霧除け"]},{"p":"EURO-10 1680x2090","h":2090,"w":1680,"t":["額縁3方","額縁受け","T-bar","霧除け"]},{"p":"EURO-10 790x1890","h":1890,"w":790,"t":["額縁3方","額縁受け","T-bar","霧除け"]},{"p":"EURO-10 790x2090","h":2090,"w":790,"t":["額縁3方","額縁受け","T-bar","霧除け"]},{"p":"EURO-10 890x2090","h":2090,"w":890,"t":["額縁3方","額縁受け","T-bar","霧除け"]},{"p":"EURO-2","h":2090,"w":890,"t":["額縁3方","額縁受け","T-bar","霧除け"]},{"p":"EURO-3P 690x1890","h":1890,"w":690,"t":["額縁3方","額縁受け","T-bar","霧除け"]},{"p":"EURO-3P 790x1990","h":1990,"w":790,"t":["額縁3方","額縁受け","T-bar","霧除け"]},{"p":"EURO-3P 790x2090","h":2090,"w":790,"t":["額縁3方","額縁受け","T-bar","霧除け"]},{"p":"EURO-6","h":2090,"w":890,"t":["額縁3方","額縁受け","T-bar","霧除け"]},{"p":"EURO-7","h":2090,"w":890,"t":["額縁3方","額縁受け","T-bar","霧除け"]},{"p":"EURO-8","h":2090,"w":890,"t":["額縁3方","額縁受け","T-bar","霧除け"]},{"p":"MTF-1718(FIX)","h":1816,"w":1695,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"MTPDL-2120","h":2019,"w":2250,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"NHW-1-17","h":1744,"w":716,"t":["額縁3方","T-bar","木口"]},{"p":"NV-1 790x1890","h":1890,"w":790,"t":["額縁3方","額縁受け","T-bar"]},{"p":"NV-1 790x2090","h":2090,"w":790,"t":["額縁3方","額縁受け","T-bar"]},{"p":"NVs-1 1142x2062","h":2062,"w":1142,"t":["額縁3方","T-bar","木口"]},{"p":"NVs-1 695x1874","h":1874,"w":695,"t":["額縁3方","T-bar","木口"]},{"p":"NVs-1 695x2074","h":2074,"w":695,"t":["額縁3方","T-bar","木口"]},{"p":"NVs-1 795x2074","h":2074,"w":795,"t":["額縁3方","T-bar","木口"]},{"p":"NW-1 761x2062","h":2062,"w":761,"t":["額縁3方","T-bar","木口"]},{"p":"NW-1 762x2062","h":2062,"w":762,"t":["額縁3方","T-bar","木口"]},{"p":"NW-2","h":2062,"w":1142,"t":["額縁3方","T-bar","木口"]},{"p":"NW-2-10","h":1036,"w":1142,"t":["額縁3方","T-bar","木口"]},{"p":"NW-3","h":2062,"w":1521,"t":["額縁3方","T-bar","木口"]},{"p":"NW-3-10","h":1036,"w":1521,"t":["額縁3方","T-bar","木口"]},{"p":"VMSD 1500x2000","h":2000,"w":1500,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD 1810x2019","h":2019,"w":1810,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD 2000x2000","h":2000,"w":2000,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD-","h":2019,"w":2040,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 1505x2019","h":2019,"w":1505,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 1810x1800","h":1800,"w":1810,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 1810x2019","h":2019,"w":1810,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 2039x2000","h":2000,"w":2039,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 2050x2019","h":2019,"w":2050,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 2145x2019","h":2019,"w":2145,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 2200x2019","h":2019,"w":2200,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 2285x2019","h":2019,"w":2285,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD-1 2419x2019","h":2019,"w":2419,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD-OX 1810x1940","h":1940,"w":1810,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD-OX 1810x2000","h":2000,"w":1810,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMSD-OX 1810x2019","h":2019,"w":1810,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW","h":1041,"w":1422,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 1008x933","h":933,"w":1008,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 1065x1311","h":1311,"w":1065,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 1065x1652","h":1652,"w":1065,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 1065x2019","h":2019,"w":1065,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 1065x607","h":607,"w":1065,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 1065x948","h":948,"w":1065,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 1780x1540","h":1540,"w":1780,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 2419x1500","h":1500,"w":2419,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 637x2000","h":2000,"w":637,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 690x1785","h":1785,"w":690,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 727x1093","h":1093,"w":727,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 727x1940","h":1940,"w":727,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 787x2000","h":2000,"w":787,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 787x2019","h":2019,"w":787,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 810x1000","h":1000,"w":810,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 810x1323","h":1323,"w":810,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 824x1900","h":1900,"w":824,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 824x2019","h":2019,"w":824,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 845x1900","h":1900,"w":845,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 855x2019","h":2019,"w":855,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 855x685","h":685,"w":855,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 905x2019","h":2019,"w":905,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 937x2000","h":2000,"w":937,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 960x1299","h":1299,"w":960,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 960x1600","h":1600,"w":960,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 960x1900","h":1900,"w":960,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW(FIX) 960x999","h":999,"w":960,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-1 1008x1484","h":1484,"w":1008,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-1 450x597","h":597,"w":450,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-1(FIX) 450x597","h":597,"w":450,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-1(FIX) 780x650","h":650,"w":780,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-1(OBS) 450x597","h":597,"w":450,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-1(OBS) 533x889","h":889,"w":533,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-11","h":1194,"w":533,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-13","h":1194,"w":1600,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-13b","h":1194,"w":1955,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-2","h":533,"w":889,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-3","h":889,"w":533,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-3(FIX)","h":889,"w":533,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-3(OBS) 1067x889","h":889,"w":1067,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-3(OBS) 533x889","h":889,"w":533,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-3+VMW-4","h":889,"w":1600,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-4 1067x1041","h":1041,"w":1067,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-4 1067x889","h":889,"w":1067,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-4 810x1957","h":1957,"w":810,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-4+VMW-3","h":889,"w":1600,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-4a","h":889,"w":1422,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-5","h":1041,"w":533,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-6","h":1041,"w":1067,"t":["額縁4方","額縁受け","T-bar","霧除け"]},{"p":"VMW-6a","h":1041,"w":1422,"t":["額縁4方","額縁受け","T-bar","霧除け"]}];
+
+// ========== STATE ==========
+let selectedItems = []; // [{p, h, w, t, qty, wall}]  wall: "log"|"partition"
+let frameResults = [];  // [{p, type, part, length, qty, side}]
+
+// ========== 額縁ルール（IFCビューア準拠） ==========
+// front_frame: 表面の額縁辺数 ("3"=上左右, "4"=上下左右)
+// back_frame:  裏面の額縁辺数 ("3"=上左右, "4"=上下左右, null=なし)
+// front_extras: 表面のみの追加部材 (裏面にはつかない)
+const FRAME_RULES = {
+  "VMW":  {front_frame:"4", back_frame:"4", front_extras:["額縁受け","T-bar","霧除け"]},
+  "VMSD": {front_frame:"4", back_frame:"3", front_extras:["額縁受け","T-bar","霧除け"]},
+  "EURO": {front_frame:"4", back_frame:"3", front_extras:["額縁受け","T-bar","霧除け"]},
+  "NV":   {front_frame:"4", back_frame:"3", front_extras:["額縁受け","T-bar"]},
+  "NVs":  {front_frame:"3", back_frame:"3", front_extras:["木口"]},
+  "NW":   {front_frame:"4", back_frame:"3", front_extras:["T-bar","木口"]},
+  "JD":   {front_frame:"3", back_frame:"3", front_extras:["木口"]},
+  "MTF":  {front_frame:"4", back_frame:"4", front_extras:["額縁受け","T-bar","霧除け"]},
+  "MTPDL":{front_frame:"4", back_frame:"3", front_extras:["額縁受け","T-bar","霧除け"]},
+  "NHW":  {front_frame:"4", back_frame:"3", front_extras:["T-bar","木口"]},
+};
+// 間仕切壁の場合 (NV/NWのみルール変更あり、他はログ壁と同じ)
+const PARTITION_RULES = {
+  "NV":  {front_frame:"3", back_frame:"3", front_extras:[]},
+  "NW":  {front_frame:"3", back_frame:"3", front_extras:["木口"]},
+};
+
+// 品番からタイプキーを判定
+function getTypeKey(pname) {
+  const u = pname.toUpperCase();
+  if(u.startsWith('MTPDL')) return 'MTPDL';
+  if(u.startsWith('MTF'))  return 'MTF';
+  if(u.startsWith('NHW'))  return 'NHW';
+  if(u.startsWith('VMSD')) return 'VMSD';
+  if(u.startsWith('VMW'))  return 'VMW';
+  if(u.startsWith('EURO')) return 'EURO';
+  if(u.startsWith('NVS'))  return 'NVs';
+  if(u.startsWith('NV'))   return 'NV';
+  if(u.startsWith('NW'))   return 'NW';
+  if(u.startsWith('JD') || u.startsWith('SD')) return 'JD';
+  return 'JD'; // デフォルト
+}
+
+function getRule(pname, wall) {
+  const key = getTypeKey(pname);
+  if(wall === 'partition' && PARTITION_RULES[key]) return PARTITION_RULES[key];
+  return FRAME_RULES[key] || FRAME_RULES['JD'];
+}
+
+// ========== PANEL SWITCHING ==========
+function showPanel(n) {
+  document.querySelectorAll('.panel').forEach((p,i) => {p.classList.toggle('active', i===n)});
+  document.querySelectorAll('.tab').forEach((t,i) => {t.classList.toggle('active', i===n)});
+}
+
+// ========== PANEL 1: TATEGU SELECTION ==========
+function renderTategu(data) {
+  const body = document.getElementById('tateguBody');
+  body.innerHTML = data.map((d,i) => {
+    if(!d.p) return '';
+    const types = d.t.map(t => `<span class="tag">${t}</span>`).join('');
+    return `<tr>
+      <td><strong>${esc(d.p)}</strong></td>
+      <td class="num">${d.h}</td>
+      <td class="num">${d.w}</td>
+      <td>${types}</td>
+      <td><input type="number" min="0" value="0" id="qty_${i}" style="width:50px"></td>
+      <td><button class="btn btn-sm btn-primary" onclick="addItem(${i})">追加</button></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('filterCount').textContent = `${data.length}件表示`;
+}
+
+let filteredData = TATEGU_MASTER.filter(d => d.p);
+function filterTategu() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const tf = document.getElementById('typeFilter').value;
+  filteredData = TATEGU_MASTER.filter(d => {
+    if(!d.p) return false;
+    const matchQ = !q || d.p.toLowerCase().includes(q) || `${d.h}`.includes(q) || `${d.w}`.includes(q) || `${d.w}x${d.h}`.includes(q) || `${d.h}x${d.w}`.includes(q);
+    const matchT = !tf || d.t.join(',') === tf;
+    return matchQ && matchT;
+  });
+  renderTategu(filteredData);
+  document.getElementById('masterCount').textContent = `${filteredData.length}件`;
+}
+
+function addItem(idx) {
+  const d = filteredData[idx];
+  const qtyEl = document.getElementById('qty_' + idx);
+  const qty = parseInt(qtyEl.value) || 1;
+  if(qty <= 0) return;
+  const existing = selectedItems.find(s => s.p === d.p && s.wall === 'log');
+  if(existing) { existing.qty += qty; }
+  else { selectedItems.push({p:d.p, h:d.h, w:d.w, t:[...d.t], qty, wall:'log'}); }
+  qtyEl.value = 0;
+  renderSelected();
+}
+
+function removeItem(idx) {
+  selectedItems.splice(idx, 1);
+  renderSelected();
+}
+
+function splitItem(idx) {
+  const item = selectedItems[idx];
+  if(item.qty <= 1) return;
+  item.qty -= 1;
+  // 新しいエントリを直後に挿入（独立した設定を持つ）
+  const newItem = {p:item.p, h:item.h, w:item.w, t:[...item.t], qty:1, wall:item.wall||'log'};
+  selectedItems.splice(idx + 1, 0, newItem);
+  renderSelected();
+}
+
+function clearSelected() {
+  selectedItems = [];
+  renderSelected();
+}
+
+function toggleType(itemIdx, type) {
+  const item = selectedItems[itemIdx];
+  // 額縁3方/4方: 押す度に切り替え (オフなし)
+  if(type === '額縁3方' || type === '額縁4方') {
+    const other = (type === '額縁3方') ? '額縁4方' : '額縁3方';
+    const idx = item.t.indexOf(type);
+    if(idx >= 0) { item.t[idx] = other; }
+    else {
+      const oi = item.t.indexOf(other);
+      if(oi >= 0) { item.t[oi] = type; }
+      else { item.t.unshift(type); }
+    }
+    renderSelected();
+    return;
+  }
+  // 間仕切壁: 押す度にlog/partition切り替え
+  if(type === '__wall__') {
+    if(item.wall === 'partition') {
+      item.wall = 'log';
+      // ログ壁に戻したらT-barを自動オン
+      if(!item.t.includes('T-bar')) item.t.push('T-bar');
+    } else {
+      item.wall = 'partition';
+      // 間仕切壁にはT-barがつかないので自動オフ
+      const tIdx = item.t.indexOf('T-bar');
+      if(tIdx >= 0) item.t.splice(tIdx, 1);
+    }
+    renderSelected();
+    return;
+  }
+  // その他: ON/OFF トグル
+  const idx = item.t.indexOf(type);
+  if(idx >= 0) {
+    if(item.t.length <= 1) return;
+    item.t.splice(idx, 1);
+  } else {
+    item.t.push(type);
+  }
+  renderSelected();
+}
+
+function renderSelected() {
+  const el = document.getElementById('selectedList');
+  document.getElementById('selectedCount').textContent = `${selectedItems.length}件`;
+  if(!selectedItems.length) {
+    el.innerHTML = '<div class="empty-state">建具を追加してください</div>';
+    return;
+  }
+  el.innerHTML = selectedItems.map((s,i) => {
+    // Get all possible extras (from master if available, else use current + known types)
+    const master = TATEGU_MASTER.find(m => m.p === s.p);
+    const knownExtras = ['額縁受け','T-bar','霧除け','木口'];
+    const allExtras = master
+      ? [...new Set([...master.t, ...s.t])].filter(t => t!=='額縁3方' && t!=='額縁4方')
+      : [...new Set([...s.t, ...knownExtras])].filter(t => t!=='額縁3方' && t!=='額縁4方');
+
+    // 額縁3方/4方切替ボタン (常に表示、クリックで切替)
+    const hasFrame4 = s.t.includes('額縁4方');
+    const frameLabel = hasFrame4 ? '額縁4方' : '額縁3方';
+    const frameTag = `<span class="tag-toggle on" style="background:var(--c0);border-color:var(--c0)" onclick="toggleType(${i},'${frameLabel}')" title="クリックで3方⇔4方切替">${frameLabel}</span>`;
+
+    // その他の部材タグ (ON/OFFトグル)
+    const extraTags = allExtras.map(t => {
+      const on = s.t.includes(t);
+      return `<span class="tag-toggle ${on?'on':'off'}" onclick="toggleType(${i},'${t}')" title="クリックで切替">${t}</span>`;
+    }).join('');
+
+    // 間仕切壁ボタン (トグル)
+    const isPartition = (s.wall === 'partition');
+    const wallTag = `<span class="tag-toggle ${isPartition?'on':'off'}" style="${isPartition?'background:var(--accent3);border-color:var(--accent3)':''}" onclick="toggleType(${i},'__wall__')" title="クリックで切替">間仕切壁</span>`;
+
+    return `<div class="selected-item">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <strong>${esc(s.p)}</strong>
+        <span style="color:var(--muted);font-size:11px">${s.h}×${s.w}</span>
+        <span style="margin-left:auto;display:flex;align-items:center;gap:4px">
+          ${s.qty > 1 ? `<button class="btn btn-sm" style="font-size:10px;padding:2px 6px;background:#f59e0b;color:#fff;border-color:#f59e0b" onclick="splitItem(${i})" title="1本を分割して個別設定可能にする">分割</button>` : ''}
+          <input type="number" min="1" value="${s.qty}" style="width:45px" onchange="selectedItems[${i}].qty=parseInt(this.value)||1;renderSelected()">
+          <button class="btn btn-sm" onclick="removeItem(${i})">×</button>
+        </span>
+      </div>
+      <div>${frameTag} ${extraTags} ${wallTag}</div>
+    </div>`;
+  }).join('');
+  // Show total preview
+  const totalPreview = selectedItems.reduce((sum,s) => sum + countPiecesForItem(s)*s.qty, 0);
+  document.getElementById('selectedCount').textContent = `${selectedItems.length}件 (${totalPreview}本)`;
+}
+
+// 表裏ルール準拠の本数計算 (IFCビューアと同じロジック)
+// ユーザー選択の額縁3方/4方を尊重: 選択が3方なら表裏とも3辺、4方なら表裏とも4辺
+function countPiecesForItem(item) {
+  const rule = getRule(item.p, item.wall || 'log');
+  const has4 = item.t.includes('額縁4方');
+  const has3 = item.t.includes('額縁3方');
+  const hasFrame = has4 || has3;
+  const frameSides = has4 ? 4 : 3; // ユーザー選択の方数を尊重
+  let n = 0;
+  // 表面: 額縁 + extras
+  if(hasFrame) n += frameSides;
+  for(const t of item.t) {
+    if(t==='額縁受け') { if(rule.front_extras.includes('額縁受け')) n+=1; }
+    else if(t==='T-bar') { if(rule.front_extras.includes('T-bar')) n+=2; }
+    else if(t==='霧除け') { if(rule.front_extras.includes('霧除け')) n+=1; }
+    else if(t==='木口') { if(rule.front_extras.includes('木口')) n+=3; }
+  }
+  // 裏面: 額縁のみ
+  if(hasFrame && rule.back_frame) {
+    const backSides = Math.min(frameSides, parseInt(rule.back_frame));
+    n += backSides;
+  }
+  return n;
+}
+// 後方互換
+function countPiecesForTypes(types) {
+  return countPiecesForItem({p:'JD',t:types,wall:'log'});
+}
+
+// ========== PANEL 2: FRAME CALCULATION ==========
+// IFCビューア準拠: 表面=フルセット(額縁+extras)、裏面=額縁のみ
+function calcFrames() {
+  frameResults = [];
+  for(const item of selectedItems) {
+    const {p, h, w, t, qty, wall} = item;
+    const rule = getRule(p, wall || 'log');
+    for(let q = 0; q < qty; q++) {
+      generateFramePiecesV2(p, h, w, t, rule);
+    }
+  }
+  renderFrameResults();
+  showPanel(1);
+}
+
+function generateFramePiecesV2(p, h, w, types, rule) {
+  const has4frame = types.includes('額縁4方');
+  const has3frame = types.includes('額縁3方');
+  const hasFrame = has4frame || has3frame;
+  const userSides = has4frame ? 4 : 3; // ユーザー選択を尊重
+
+  // --- 表面(front): 額縁 + extras ---
+  if(hasFrame) {
+    frameResults.push({p, type:'額縁', part:'表・上(天)', length:w+300, qty:1, side:'front'});
+    if(userSides === 4) {
+      frameResults.push({p, type:'額縁', part:'表・下(底)', length:w, qty:1, side:'front'});
+    }
+    frameResults.push({p, type:'額縁', part:'表・左(縦)', length:h+170, qty:1, side:'front'});
+    frameResults.push({p, type:'額縁', part:'表・右(縦)', length:h+170, qty:1, side:'front'});
+  }
+  // 表面の追加部材 (extras) — 裏面にはつかない
+  for(const extra of rule.front_extras) {
+    if(!types.includes(extra)) continue;
+    switch(extra) {
+      case '額縁受け':
+        frameResults.push({p, type:'額縁受け', part:'表・横', length:w, qty:1, side:'front'});
+        break;
+      case 'T-bar':
+        frameResults.push({p, type:'T-bar', part:'表・縦1', length:h, qty:1, side:'front'});
+        frameResults.push({p, type:'T-bar', part:'表・縦2', length:h, qty:1, side:'front'});
+        break;
+      case '霧除け':
+        frameResults.push({p, type:'霧除け', part:'表・横', length:w+300, qty:1, side:'front'});
+        break;
+      case '木口':
+        frameResults.push({p, type:'木口', part:'表・上(横)', length:w, qty:1, side:'front'});
+        frameResults.push({p, type:'木口', part:'表・左(縦)', length:h, qty:1, side:'front'});
+        frameResults.push({p, type:'木口', part:'表・右(縦)', length:h, qty:1, side:'front'});
+        break;
+    }
+  }
+
+  // --- 裏面(back): 額縁のみ (T-bar/額縁受け/霧除け/木口なし) ---
+  if(hasFrame && rule.back_frame) {
+    const backSides = Math.min(userSides, parseInt(rule.back_frame));
+    frameResults.push({p, type:'額縁', part:'裏・上(天)', length:w+300, qty:1, side:'back'});
+    if(backSides === 4) {
+      frameResults.push({p, type:'額縁', part:'裏・下(底)', length:w, qty:1, side:'back'});
+    }
+    frameResults.push({p, type:'額縁', part:'裏・左(縦)', length:h+170, qty:1, side:'back'});
+    frameResults.push({p, type:'額縁', part:'裏・右(縦)', length:h+170, qty:1, side:'back'});
+  }
+}
+
+const TYPE_COLORS = {'額縁':'var(--c0)','額縁受け':'var(--c1)','T-bar':'var(--c2)','霧除け':'var(--c3)','木口':'var(--c4)'};
+
+function renderFrameResults() {
+  // Summary
+  const byType = {};
+  let totalPieces = 0;
+  for(const f of frameResults) {
+    if(!byType[f.type]) byType[f.type] = {count:0, totalLen:0};
+    byType[f.type].count += f.qty;
+    byType[f.type].totalLen += f.length * f.qty;
+    totalPieces += f.qty;
+  }
+  document.getElementById('frameSummary').innerHTML =
+    `<div class="summary-box"><div class="label">総本数</div><div class="value">${totalPieces}本</div></div>` +
+    Object.entries(byType).map(([t,v]) =>
+      `<div class="summary-box"><div class="label"><span class="type-dot" style="background:${TYPE_COLORS[t]||'#999'}"></span>${t}</div><div class="value" style="font-size:16px">${v.count}本 <span style="font-size:12px;color:var(--muted)">(${(v.totalLen/1000).toFixed(1)}m)</span></div></div>`
+    ).join('');
+  document.getElementById('frameCount').textContent = `${totalPieces}本`;
+
+  // Detail table
+  const body = document.getElementById('frameBody');
+  body.innerHTML = frameResults.map(f => {
+    const c = TYPE_COLORS[f.type] || '#999';
+    const sideLabel = f.side === 'front' ? '表' : '裏';
+    const sideColor = f.side === 'front' ? 'var(--accent2)' : 'var(--accent)';
+    return `<tr>
+      <td><strong>${esc(f.p)}</strong></td>
+      <td><span style="font-size:11px;font-weight:600;color:${sideColor}">${sideLabel}</span></td>
+      <td><span class="type-dot" style="background:${c}"></span>${f.type}</td>
+      <td style="color:var(--muted)">${f.part}</td>
+      <td class="num"><strong>${f.length.toLocaleString()}</strong></td>
+      <td class="num">${f.qty}</td>
+    </tr>`;
+  }).join('');
+
+  // Type summary sidebar
+  document.getElementById('typeSummary').innerHTML = '<table style="width:100%">' +
+    Object.entries(byType).map(([t,v]) =>
+      `<tr><td><span class="type-dot" style="background:${TYPE_COLORS[t]||'#999'}"></span>${t}</td><td class="num"><strong>${v.count}</strong>本</td><td class="num">${(v.totalLen/1000).toFixed(1)}m</td></tr>`
+    ).join('') + '</table>';
+}
+
+// ========== PANEL 3: WOOD CUTTING (KIDORI) ==========
+function calcKidori() {
+  const matLen = parseInt(document.getElementById('materialLength').value) || 3930;
+  const sawLoss = parseInt(document.getElementById('sawLoss').value) || 5;
+  showPanel(2);
+
+  if(!frameResults.length) {
+    document.getElementById('kidoriResult').innerHTML = '<div class="empty-state">先に額縁拾いを実行してください</div>';
+    return;
+  }
+
+  // Expand all pieces (exclude 0-length pieces)
+  let pieces = [];
+  for(const f of frameResults) {
+    if(f.length <= 0) continue;
+    for(let i = 0; i < f.qty; i++) {
+      pieces.push({p:f.p, type:f.type, part:f.part, length:f.length});
+    }
+  }
+
+  // Always separate by type
+  const groups = {};
+  for(const pc of pieces) {
+    if(!groups[pc.type]) groups[pc.type] = [];
+    groups[pc.type].push(pc);
+  }
+  let html = '';
+  let totalMats = 0;
+  let totalWaste = 0;
+  let totalActualLen = 0;
+  window._kidoriGroups = {}; // Store for print
+
+  for(const [type, pcs] of Object.entries(groups)) {
+    const result = binPack(pcs, matLen, sawLoss);
+    totalMats += result.materials.length;
+    totalWaste += result.totalWaste;
+    const actualLen = pcs.reduce((s,pc) => s + pc.length, 0);
+    totalActualLen += actualLen;
+    const materialTotalLen = result.materials.length * matLen;
+    window._kidoriGroups[type] = {result, pcs, actualLen, materialTotalLen};
+
+    html += `<div class="card kidori-type-card" data-type="${esc(type)}">
+      <div class="card-header">
+        <h2><span class="type-dot" style="background:${TYPE_COLORS[type]||'#999'}"></span>${type}</h2>
+        <span class="badge">${result.materials.length}本</span>
+        <span style="margin-left:auto;font-size:12px">
+          実長さ合計: <strong>${(actualLen/1000).toFixed(1)}m</strong>
+          → 木取り後必要長さ: <strong>${(materialTotalLen/1000).toFixed(1)}m</strong> (定尺${matLen}mm × ${result.materials.length}本)
+        </span>
+      </div>`;
+    html += `<div class="kidori-detail">`;
+    html += renderKidoriMaterials(result.materials, matLen);
+    html += `</div></div>`;
+  }
+
+  document.getElementById('kidoriSummary').innerHTML =
+    `<div class="summary-box"><div class="label">必要材料</div><div class="value">${totalMats}本</div></div>
+     <div class="summary-box"><div class="label">実長さ合計</div><div class="value" style="font-size:16px">${(totalActualLen/1000).toFixed(1)}m</div></div>
+     <div class="summary-box"><div class="label">木取り後必要長さ</div><div class="value" style="font-size:16px">${(totalMats*matLen/1000).toFixed(1)}m</div></div>
+     <div class="summary-box"><div class="label">歩留まり率</div><div class="value green">${((1 - totalWaste/(totalMats*matLen))*100).toFixed(1)}%</div></div>`;
+  document.getElementById('kidoriResult').innerHTML = html;
+}
+
+// First Fit Decreasing bin packing
+function binPack(pieces, matLen, sawLoss) {
+  // Sort by length descending
+  const sorted = [...pieces].sort((a,b) => b.length - a.length);
+  const materials = []; // [{remaining, pieces:[]}]
+
+  for(const pc of sorted) {
+    if(pc.length <= 0) continue;
+    if(pc.length > matLen) {
+      // Piece longer than material - needs special handling
+      materials.push({remaining: 0, pieces:[{...pc, note:'定尺超え'}]});
+      continue;
+    }
+    // Find first material with enough space
+    let placed = false;
+    for(const mat of materials) {
+      if(mat.remaining >= pc.length) {
+        mat.pieces.push(pc);
+        mat.remaining -= (pc.length + sawLoss);
+        if(mat.remaining < 0) mat.remaining = 0;
+        placed = true;
+        break;
+      }
+    }
+    if(!placed) {
+      const newMat = {remaining: matLen - pc.length - sawLoss, pieces:[pc]};
+      if(newMat.remaining < 0) newMat.remaining = 0;
+      materials.push(newMat);
+    }
+  }
+
+  const totalWaste = materials.reduce((s,m) => s + Math.max(0, m.remaining), 0);
+  return {materials, totalWaste};
+}
+
+function renderKidoriMaterials(materials, matLen) {
+  let html = '<div style="padding:12px">';
+  materials.forEach((mat, mi) => {
+    const usedLen = matLen - Math.max(0, mat.remaining);
+    html += `<div style="margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+        <span style="font-size:11px;color:var(--muted);width:50px">No.${mi+1}</span>
+        <span style="font-size:11px">${mat.pieces.map(pc => `${esc(pc.p)}(${pc.length})`).join(' + ')}</span>
+        <span style="margin-left:auto;font-size:11px;color:var(--muted)">残 ${Math.max(0,mat.remaining)}mm</span>
+      </div>
+      <div class="material-bar">`;
+    for(const pc of mat.pieces) {
+      const w = (pc.length / matLen * 100).toFixed(1);
+      const c = TYPE_COLORS[pc.type] || '#999';
+      html += `<div class="piece" style="width:${w}%;background:${c}" title="${esc(pc.p)} ${pc.type} ${pc.length}mm">${pc.length}</div>`;
+    }
+    if(mat.remaining > 0) {
+      const rw = (mat.remaining / matLen * 100).toFixed(1);
+      html += `<div class="rest" style="width:${rw}%">${mat.remaining}</div>`;
+    }
+    html += `</div></div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+// ========== PDF IMPORT ==========
+// Set pdf.js worker
+if(typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
+function handlePdfDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if(file && file.name.endsWith('.pdf')) handlePdfFile(file);
+}
+
+async function handlePdfFile(file) {
+  if(!file) return;
+  const dropEl = document.getElementById('pdfDrop');
+  dropEl.querySelector('.drop-text').textContent = '読み込み中...';
+  try {
+    const arrayBuf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data: arrayBuf}).promise;
+    const allLines = [];
+    for(let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const tc = await page.getTextContent();
+      // Group text items by Y coordinate to form lines
+      const yGroups = {};
+      for(const item of tc.items) {
+        if(!item.str.trim()) continue;
+        const y = Math.round(item.transform[5]);
+        if(!yGroups[y]) yGroups[y] = [];
+        yGroups[y].push({x: item.transform[4], text: item.str});
+      }
+      // Sort by Y descending (PDF origin is bottom-left)
+      const sortedYs = Object.keys(yGroups).sort((a,b) => b - a);
+      for(const y of sortedYs) {
+        const items = yGroups[y].sort((a,b) => a.x - b.x);
+        allLines.push(items.map(it => it.text).join(' '));
+      }
+    }
+    const parsed = parsePdfLines(allLines, file.name);
+    showPdfResult(parsed, file.name);
+  } catch(err) {
+    alert('PDF読み込みエラー: ' + err.message);
+    console.error(err);
+  }
+  dropEl.querySelector('.drop-text').textContent = '建具表PDFをドラッグ＆ドロップ または クリックで選択';
+}
+
+function parsePdfLines(lines, filename) {
+  const items = [];
+  let section = null; // 'door' or 'window'
+
+  for(let li = 0; li < lines.length; li++) {
+    const line = lines[li];
+    // Detect section headers
+    if(line.includes('TALO建具表（ドア）')) { section = 'door'; continue; }
+    if(line.includes('TALO建具表（窓）')) { section = 'window'; continue; }
+    if(!section) continue;
+    // End of sections
+    if(line.startsWith('特記：') || line.startsWith('TITLE')) { section = null; continue; }
+
+    // Find マーカーテキスト line
+    if(line.startsWith('マーカーテキスト')) {
+      const markers = line.replace(/^マーカーテキスト\s*/, '').trim().split(/\s+/);
+      // Next lines: 数量, Ｗ, Ｈ
+      const qtyLine = li+1 < lines.length ? lines[li+1] : '';
+      const wLine = li+2 < lines.length ? lines[li+2] : '';
+      const hLine = li+3 < lines.length ? lines[li+3] : '';
+
+      const qtys = qtyLine.replace(/^数量\s*/, '').trim().split(/\s+/);
+      const ws = wLine.replace(/^Ｗ\s*/, '').trim().split(/\s+/);
+      const hs = hLine.replace(/^Ｈ\s*/, '').trim().split(/\s+/);
+
+      const count = Math.min(markers.length, qtys.length, ws.length, hs.length);
+      for(let i = 0; i < count; i++) {
+        const marker = markers[i];
+        const qty = parseInt(qtys[i]) || 0;
+        const w = parseInt(ws[i].replace(/,/g, '')) || 0;
+        const h = parseInt(hs[i].replace(/,/g, '')) || 0;
+        if(qty <= 0 || (w <= 0 && h <= 0)) continue;
+        items.push({marker, qty, w, h, section});
+      }
+    }
+  }
+
+  // Extract model name from filename or PDF text
+  let modelName = filename.replace(/\s*建具表.*$/, '').replace(/\.pdf$/i, '');
+
+  return {modelName, items};
+}
+
+// Default type rules by prefix (for unmatched items)
+const TYPE_RULES = {
+  'VMW':['額縁4方','額縁受け','T-bar','霧除け'], 'VMSD':['額縁4方','額縁受け','T-bar','霧除け'],
+  'NV':['額縁3方','額縁受け','T-bar'], 'NVs':['額縁3方','T-bar','木口'], 'NW':['額縁3方','T-bar','木口'],
+  'EURO':['額縁3方','額縁受け','T-bar','霧除け'], 'MTF':['額縁4方','額縁受け','T-bar','霧除け'],
+  'MTPDL':['額縁4方','額縁受け','T-bar','霧除け'], 'NHW':['額縁3方','T-bar','木口']
+};
+function getDefaultTypes(marker) {
+  for(const [pf,t] of Object.entries(TYPE_RULES)) { if(marker.startsWith(pf)) return [...t]; }
+  return ['額縁4方','額縁受け','T-bar','霧除け'];
+}
+
+// ========== 規格寸法チェック ==========
+// 品番 → [w, h] の規格寸法マスタ（CAD入力ミス検出用）
+const SIZE_MASTER = {
+  'VMW-1':[450,597], 'VMW-1(FIX)':[450,597], 'VMW-1(OBS)':[450,597],
+  'VMW-2':[889,533], 'VMW-3':[533,889], 'VMW-3(FIX)':[533,889], 'VMW-3(OBS)':[533,889],
+  'VMW-3+VMW-4':[1600,889], 'VMW-4':[1067,889], 'VMW-4a':[1422,889],
+  'VMW-5':[533,1041], 'VMW-6':[1067,1041], 'VMW-6a':[1422,1041],
+  'VMW-11':[533,1194], 'VMW-13':[1600,1194], 'VMW-13b':[1955,1194],
+  'VMSD':[1505,2019], 'VMSD-1':[1505,2019], 'VMSD 1505x2019':[1505,2019],
+  'VMSD 1810x2019':[1810,2019], 'VMSD 2419x2019':[2419,2019],
+};
+// 規格寸法 → 品番 の逆引き（寸法から正しい品番を推定）
+const SIZE_TO_CODE = {};
+for(const [code, [w,h]] of Object.entries(SIZE_MASTER)) {
+  const key = `${w}x${h}`;
+  if(!SIZE_TO_CODE[key]) SIZE_TO_CODE[key] = [];
+  if(!SIZE_TO_CODE[key].includes(code)) SIZE_TO_CODE[key].push(code);
+}
+
+function validateDimensions(marker, w, h) {
+  // マーカー名からベースコードを抽出 (例: "VMW-4" from "VMW-4 1067x889")
+  const baseCode = marker.split(/\s/)[0];
+  const spec = SIZE_MASTER[baseCode];
+  if(!spec) return null; // 規格マスタにない品番はチェック対象外
+
+  const [specW, specH] = spec;
+  const tolerance = 5; // 5mm以内は許容
+  if(Math.abs(w - specW) <= tolerance && Math.abs(h - specH) <= tolerance) return null; // OK
+
+  // 不一致 → 実寸法から正しい品番を逆引き
+  const actualKey = `${w}x${h}`;
+  const correctCodes = SIZE_TO_CODE[actualKey] || [];
+  // 近似検索（±5mm）
+  let nearCodes = [];
+  if(!correctCodes.length) {
+    for(const [key, codes] of Object.entries(SIZE_TO_CODE)) {
+      const [kw, kh] = key.split('x').map(Number);
+      if(Math.abs(kw - w) <= tolerance && Math.abs(kh - h) <= tolerance) {
+        nearCodes = codes;
+        break;
+      }
+    }
+  }
+  const suggestion = correctCodes.length ? correctCodes : nearCodes;
+  return {
+    marker: baseCode, specW, specH, actualW: w, actualH: h,
+    suggestion: suggestion.filter(c => c !== baseCode)
+  };
+}
+
+function matchToMaster(marker, w, h) {
+  if(marker === '---') return matchByDimensions(w, h);
+
+  // Step 1: Try exact match (including suffix like (OBS))
+  let exact = TATEGU_MASTER.find(m => m.p === marker);
+  if(exact) return {matched: true, master: exact, label: exact.p};
+
+  // Step 2: Find candidates starting with marker (e.g., "VMW-4" matches "VMW-4 1067x889")
+  let candidates = TATEGU_MASTER.filter(m => m.p && m.p.startsWith(marker + ' '));
+  if(candidates.length === 1) return {matched: true, master: candidates[0], label: candidates[0].p};
+  if(candidates.length > 1) {
+    // Pick closest by dimensions
+    candidates.sort((a,b) => {
+      const da = Math.abs(a.h-h)+Math.abs(a.w-w);
+      const db = Math.abs(b.h-h)+Math.abs(b.w-w);
+      return da - db;
+    });
+    return {matched: true, master: candidates[0], label: candidates[0].p, approx: true};
+  }
+
+  // Step 3: Try without suffix (OBS)/(FIX) etc.
+  const cleanMarker = marker.replace(/\([^)]*\)/g, '').trim();
+  if(cleanMarker !== marker) {
+    exact = TATEGU_MASTER.find(m => m.p === cleanMarker);
+    if(exact) return {matched: true, master: exact, label: exact.p};
+    // Try with suffix-stripped + dimension
+    candidates = TATEGU_MASTER.filter(m => m.p && m.p.startsWith(cleanMarker + ' '));
+    if(candidates.length > 0) {
+      candidates.sort((a,b) => Math.abs(a.h-h)+Math.abs(a.w-w) - (Math.abs(b.h-h)+Math.abs(b.w-w)));
+      return {matched: true, master: candidates[0], label: candidates[0].p, approx: true};
+    }
+    // Also try original marker with dimension (e.g., "VMW-1(OBS) 450x597")
+    candidates = TATEGU_MASTER.filter(m => m.p && m.p.startsWith(marker + ' '));
+    if(candidates.length > 0) {
+      candidates.sort((a,b) => Math.abs(a.h-h)+Math.abs(a.w-w) - (Math.abs(b.h-h)+Math.abs(b.w-w)));
+      return {matched: true, master: candidates[0], label: candidates[0].p, approx: true};
+    }
+  }
+
+  // Step 4: Try base code (e.g., "VMSD-1" from "VMSD-1")
+  const baseMatch = cleanMarker.match(/^([A-Za-z]+-?\d*)/);
+  if(baseMatch) {
+    candidates = TATEGU_MASTER.filter(m => m.p && m.p.startsWith(baseMatch[1] + ' '));
+    if(candidates.length > 0) {
+      candidates.sort((a,b) => Math.abs(a.h-h)+Math.abs(a.w-w) - (Math.abs(b.h-h)+Math.abs(b.w-w)));
+      const best = candidates[0];
+      const dist = Math.abs(best.h-h)+Math.abs(best.w-w);
+      return {matched: true, master: best, label: best.p, approx: dist > 20};
+    }
+  }
+
+  // Step 5: Dimension-based fallback
+  return matchByDimensions(w, h, marker);
+}
+
+function matchByDimensions(w, h, label) {
+  // Find closest match by dimensions
+  let bestMatch = null;
+  let bestDist = Infinity;
+
+  for(const m of TATEGU_MASTER) {
+    if(!m.p || !m.h || !m.w) continue;
+    // Try both orientations
+    const d1 = Math.abs(m.h - h) + Math.abs(m.w - w);
+    const d2 = Math.abs(m.h - w) + Math.abs(m.w - h);
+    const dist = Math.min(d1, d2);
+    if(dist < bestDist) {
+      bestDist = dist;
+      bestMatch = m;
+    }
+  }
+
+  // Accept if dimensions are within ~100mm tolerance
+  if(bestMatch && bestDist <= 100) {
+    return {matched: true, master: bestMatch, label: bestMatch.p, approx: true, dimLabel: label || '---'};
+  }
+
+  // No match - create custom entry with default types
+  return {matched: false, source: 'custom', types: getDefaultTypes(label || ''), label: label || `${w}x${h}`};
+}
+
+function showPdfResult(parsed, filename) {
+  const el = document.getElementById('pdfResult');
+  el.style.display = 'block';
+
+  // Match each item to master
+  const matchedItems = parsed.items.map(item => {
+    const result = matchToMaster(item.marker, item.w, item.h);
+    return {...item, matchResult: result};
+  });
+
+  // Separate into TALO products and JD/JW
+  const taloItems = matchedItems.filter(it => it.marker !== '---');
+  const jdItems = matchedItems.filter(it => it.marker === '---');
+
+  // 寸法チェック
+  const dimErrors = [];
+  for(const it of taloItems) {
+    const err = validateDimensions(it.marker, it.w, it.h);
+    if(err) dimErrors.push(err);
+  }
+
+  let html = `<div class="pdf-result">`;
+  html += `<h3><span class="badge green">${parsed.modelName}</span> 建具表読み取り結果 <span style="font-size:12px;color:var(--muted)">(${matchedItems.length}種類)</span></h3>`;
+
+  // 寸法不一致警告
+  if(dimErrors.length) {
+    html += `<div style="background:#fef2f2;border:2px solid #dc2626;border-radius:8px;padding:12px 16px;margin-bottom:12px">`;
+    html += `<div style="font-weight:700;color:#dc2626;margin-bottom:8px">⚠ CAD寸法エラー検出 (${dimErrors.length}件)</div>`;
+    html += `<table style="width:100%;font-size:13px"><thead><tr style="color:#dc2626"><th>品番</th><th class="num">規格W</th><th class="num">規格H</th><th class="num">実W</th><th class="num">実H</th><th>推定正解</th></tr></thead><tbody>`;
+    for(const e of dimErrors) {
+      const sugText = e.suggestion.length ? e.suggestion.join(', ') : '該当なし';
+      html += `<tr style="background:#fff">
+        <td><strong style="color:#dc2626">${esc(e.marker)}</strong></td>
+        <td class="num">${e.specW}</td><td class="num">${e.specH}</td>
+        <td class="num" style="color:#dc2626;font-weight:700">${e.actualW}</td>
+        <td class="num" style="color:#dc2626;font-weight:700">${e.actualH}</td>
+        <td><strong>${esc(sugText)}</strong></td>
+      </tr>`;
+    }
+    html += `</tbody></table>`;
+    html += `<div style="font-size:11px;color:#991b1b;margin-top:6px">マーカー名に対して実際の寸法が規格と一致しません。CADの入力ミスの可能性があります。</div>`;
+    html += `</div>`;
+  }
+
+  // TALO items table
+  if(taloItems.length) {
+    html += `<div style="font-size:12px;font-weight:600;color:var(--muted);margin:8px 0 4px">TALO建具 (${taloItems.length}種)</div>`;
+    html += '<table style="width:100%"><thead><tr><th>CAD品番</th><th>数量</th><th class="num">W</th><th class="num">H</th><th>マッチ</th><th>種別</th></tr></thead><tbody>';
+    taloItems.forEach((it, i) => {
+      const mr = it.matchResult;
+      const matchLabel = mr.matched
+        ? `<span class="match">✓ ${esc(mr.label)}${mr.approx ? ' (近似)' : ''}</span>`
+        : `<span class="nomatch">${mr.source === 'EURO' ? '⚡ EURO' : '⚠ 新規'} ${esc(mr.label)}</span>`;
+      const types = mr.matched ? mr.master.t : mr.types;
+      const typeTags = types.map(t => `<span class="tag">${t}</span>`).join('');
+      const dimErr = validateDimensions(it.marker, it.w, it.h);
+      const rowStyle = dimErr ? ' style="background:#fef2f2"' : '';
+      const dimWarn = dimErr ? ` <span style="color:#dc2626;font-size:11px;font-weight:700" title="規格: ${dimErr.specW}×${dimErr.specH}">⚠寸法</span>` : '';
+      html += `<tr${rowStyle}>
+        <td><strong>${esc(it.marker)}</strong>${dimWarn}</td>
+        <td class="num">${it.qty}</td>
+        <td class="num">${it.w.toLocaleString()}</td>
+        <td class="num">${it.h.toLocaleString()}</td>
+        <td>${matchLabel}</td>
+        <td>${typeTags}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+  }
+
+  // JD/JW items
+  if(jdItems.length) {
+    html += `<div style="font-size:12px;font-weight:600;color:var(--muted);margin:8px 0 4px">JD/JW 施工調達品 (${jdItems.length}種)</div>`;
+    html += '<table style="width:100%"><thead><tr><th>区分</th><th>数量</th><th class="num">W</th><th class="num">H</th><th>マッチ</th><th>種別</th></tr></thead><tbody>';
+    jdItems.forEach(it => {
+      const mr = it.matchResult;
+      const matchLabel = mr.matched
+        ? `<span class="match">✓ ${esc(mr.label)}${mr.approx ? ' (近似)' : ''}</span>`
+        : `<span class="nomatch">⚠ 新規 ${it.w}×${it.h}</span>`;
+      const types = mr.matched ? mr.master.t : mr.types;
+      const typeTags = types.map(t => `<span class="tag">${t}</span>`).join('');
+      html += `<tr>
+        <td><strong>${it.section === 'door' ? 'JD' : 'JW'}</strong></td>
+        <td class="num">${it.qty}</td>
+        <td class="num">${it.w.toLocaleString()}</td>
+        <td class="num">${it.h.toLocaleString()}</td>
+        <td>${matchLabel}</td>
+        <td>${typeTags}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+  }
+
+  html += `<div class="import-actions">
+    <button class="btn btn-primary" onclick="importPdfItems()">選択済みに取り込む →</button>
+    <button class="btn" onclick="document.getElementById('pdfResult').style.display='none'">閉じる</button>
+    <span style="font-size:12px;color:var(--muted);margin-left:auto">取り込み後、種別をクリックでON/OFF切替可</span>
+  </div>`;
+  html += '</div>';
+
+  el.innerHTML = html;
+
+  // Store for import
+  window._pdfMatchedItems = matchedItems;
+  window._pdfModelName = parsed.modelName;
+}
+
+function importPdfItems() {
+  if(!window._pdfMatchedItems) return;
+
+  // Set project name
+  if(window._pdfModelName) {
+    document.getElementById('projectName').value = window._pdfModelName;
+  }
+
+  // Clear existing and import
+  selectedItems = [];
+
+  for(const item of window._pdfMatchedItems) {
+    const mr = item.matchResult;
+    let entry;
+
+    if(mr.matched) {
+      // Use master data
+      entry = {
+        p: mr.label,
+        h: mr.master.h,
+        w: mr.master.w,
+        t: [...mr.master.t],
+        qty: item.qty,
+        wall: 'log'
+      };
+    } else {
+      // Unmatched (EURO, JD/JW, custom) - create with CAD dimensions + default types
+      const label = item.marker !== '---'
+        ? item.marker
+        : `${item.section === 'door' ? 'JD' : 'JW'}_${item.w}x${item.h}`;
+      entry = {
+        p: label,
+        h: item.h,
+        w: item.w,
+        t: mr.types || getDefaultTypes(item.marker),
+        qty: item.qty,
+        wall: 'log'
+      };
+    }
+
+    // Merge with existing if same product and same wall type
+    const existing = selectedItems.find(s => s.p === entry.p && s.h === entry.h && s.w === entry.w && s.wall === entry.wall);
+    if(existing) {
+      existing.qty += entry.qty;
+    } else {
+      selectedItems.push(entry);
+    }
+  }
+
+  renderSelected();
+  document.getElementById('pdfResult').style.display = 'none';
+
+  // Show summary
+  const total = selectedItems.reduce((s,it) => s + it.qty, 0);
+  alert(`${selectedItems.length}種類 (計${total}個) を取り込みました。種別タグをクリックしてON/OFF調整できます。`);
+}
+
+// ========== PRINT ==========
+function printKidori() {
+  const includeDetail = document.getElementById('printDetail').checked;
+  const projectName = document.getElementById('projectName').value || '(物件名未入力)';
+  const matLen = parseInt(document.getElementById('materialLength').value) || 3930;
+
+  // Add print header
+  let printHeader = document.getElementById('printHeader');
+  if(!printHeader) {
+    printHeader = document.createElement('div');
+    printHeader.id = 'printHeader';
+    printHeader.className = 'print-header';
+    document.getElementById('panel2').prepend(printHeader);
+  }
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}/${(now.getMonth()+1).toString().padStart(2,'0')}/${now.getDate().toString().padStart(2,'0')}`;
+  printHeader.innerHTML = `<h1>木取り計算書</h1><div class="print-meta">${esc(projectName)} ｜ 定尺: ${matLen}mm ｜ ${dateStr}</div>`;
+
+  // Mark panel as print target
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('print-target'));
+  document.getElementById('panel2').classList.add('print-target');
+
+  // Toggle detail visibility
+  if(!includeDetail) {
+    document.getElementById('panel2').classList.add('no-print-detail');
+  } else {
+    document.getElementById('panel2').classList.remove('no-print-detail');
+  }
+
+  window.print();
+
+  // Cleanup after print
+  setTimeout(() => {
+    document.getElementById('panel2').classList.remove('print-target', 'no-print-detail');
+  }, 500);
+}
+
+// ========== UTILS ==========
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ========== INIT ==========
+filterTategu();
+</script>
+</body>
+</html>
