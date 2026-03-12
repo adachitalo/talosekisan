@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """根太拾い3Dビューア: 基礎区画ごとに根太を自動配置し積算
-Usage:
-  python build_neda_viewer.py <input.ifc> <output.html>
+
+Usage: python build_neda_viewer.py <input.ifc> <output.html>
 
 根太配置ルール:
   - 方向: 垂木と平行（slope_axis方向）
@@ -10,6 +10,7 @@ Usage:
   - 区画の両端には必ず根太を配置
   - ユニットバスのスラブ切れは無視
 """
+
 import sys
 import os
 import ifcopenshell
@@ -22,6 +23,7 @@ from collections import defaultdict, Counter
 WALL_SUB = {"log": "ログ壁", "majikiri": "間仕切壁"}
 SKIP = {"I", "kiso", "dodai"}
 FULL_WALL_SUB = {"log": "ログ壁", "majikiri": "間仕切壁", "kiso": "基礎", "dodai": "土台", "I": "断熱壁"}
+
 TYPE_NAMES = {
     "IfcWall": "壁", "IfcWallStandardCase": "壁",
     "IfcSlab": "スラブ", "IfcColumn": "柱", "IfcBeam": "梁",
@@ -29,12 +31,13 @@ TYPE_NAMES = {
     "IfcRailing": "手摺", "IfcRoof": "屋根", "IfcMember": "部材",
     "IfcPlate": "板", "IfcCurtainWall": "カーテンウォール", "IfcFooting": "基礎",
 }
+
 CATEGORY_COLORS = {
     "ログ壁": "#D2691E", "間仕切壁": "#CD853F", "基礎": "#808080",
     "土台": "#8B7355", "1F床": "#DEB887", "2F床": "#D2B48C",
     "テラス": "#BC8F8F", "バルコニー": "#C4A882", "屋根": "#8B0000",
-    "柱": "#A0522D", "梁": "#B8860B", "ドア": "#4682B4", "窓": "#87CEEB",
-    "手摺": "#708090", "階段": "#696969",
+    "柱": "#A0522D", "梁": "#B8860B", "ドア": "#4682B4",
+    "窓": "#87CEEB", "手摺": "#708090", "階段": "#696969",
 }
 
 JOIST_PITCHES = [0.455, 0.303]  # 455mm, 303mm
@@ -67,13 +70,11 @@ def classify_slab(en, ln):
 ###############################################################################
 # 屋根パラメータ自動検出（slope_axis / ridge_axis を得るため）
 ###############################################################################
-
 def detect_roof_params(ifc, settings):
     """IFC屋根メッシュから棟方向・勾配方向を自動検出。
     根太の方向（= slope_axis）を決定するために使用。
     """
     top_verts = []
-
     for elem in list(ifc.by_type("IfcSlab")) + list(ifc.by_type("IfcRoof")):
         ename = (elem.Name or "").lower()
         if elem.is_a("IfcSlab") and "yane" not in ename and "roof" not in ename:
@@ -105,22 +106,18 @@ def detect_roof_params(ifc, settings):
 
     tv = np.array(top_verts)
     tv = np.unique(np.round(tv, 3), axis=0)
-
     ridge_height = tv[:, 1].max()
     ridge_tol = 0.15
     ridge_mask = tv[:, 1] > ridge_height - ridge_tol
     ridge_pts = tv[ridge_mask]
-
     ridge_x_span = ridge_pts[:, 0].max() - ridge_pts[:, 0].min()
     ridge_z_span = ridge_pts[:, 2].max() - ridge_pts[:, 2].min()
-
     if ridge_x_span > ridge_z_span:
         ridge_axis = "x"
         slope_axis = "z"
     else:
         ridge_axis = "z"
         slope_axis = "x"
-
     print(f"  Ridge axis: {ridge_axis}, Slope axis: {slope_axis}")
     return {"ridge_axis": ridge_axis, "slope_axis": slope_axis}
 
@@ -128,12 +125,10 @@ def detect_roof_params(ifc, settings):
 ###############################################################################
 # 基礎区画検出
 ###############################################################################
-
 def detect_kiso_compartments(ifc, settings, rp):
     """基礎壁から区画を検出する。
     IFC座標系（X, Y が水平面、Z が高さ）で壁を解析。
     Three.js座標系へは最後に変換する。
-
     Returns: list of dicts with x_min, x_max, y_min, y_max (IFC座標)
     """
     slope_axis = rp["slope_axis"]
@@ -192,14 +187,16 @@ def detect_kiso_compartments(ifc, settings, rp):
     def x_wall_covers(y_pos, x1, x2):
         """Y位置y_posにあるX方向壁が[x1,x2]をカバーしているか"""
         return any(
-            abs(w["cy"] - y_pos) < tol and w["x_min"] <= x1 + tol and w["x_max"] >= x2 - tol
+            abs(w["cy"] - y_pos) < tol and
+            w["x_min"] <= x1 + tol and w["x_max"] >= x2 - tol
             for w in x_walls
         )
 
     def y_wall_covers(x_pos, y1, y2):
         """X位置x_posにあるY方向壁が[y1,y2]をカバーしているか"""
         return any(
-            abs(w["cx"] - x_pos) < tol and w["y_min"] <= y1 + tol and w["y_max"] >= y2 - tol
+            abs(w["cx"] - x_pos) < tol and
+            w["y_min"] <= y1 + tol and w["y_max"] >= y2 - tol
             for w in y_walls
         )
 
@@ -209,14 +206,9 @@ def detect_kiso_compartments(ifc, settings, rp):
         for xj in range(xi + 1, len(x_positions)):
             x1, x2 = x_positions[xi], x_positions[xj]
 
-            # この X 範囲で両側のY壁がカバーしているか確認
-            # ただし、間に中間Y壁がある場合はスキップ（細かい区画を優先）
-            # まず中間のY壁をチェック
             has_intermediate_y_wall = False
             for xk in range(xi + 1, xj):
                 xm = x_positions[xk]
-                # この中間Y壁が y全範囲をカバーしているか
-                # → 簡易チェック: どのY範囲でもカバーしていれば中間壁あり
                 for yk in range(len(y_positions)):
                     for yl in range(yk + 1, len(y_positions)):
                         y1t, y2t = y_positions[yk], y_positions[yl]
@@ -231,7 +223,6 @@ def detect_kiso_compartments(ifc, settings, rp):
                 continue
 
             if not y_wall_covers(x1, y_positions[0], y_positions[-1]):
-                # 左辺の壁が全くない場合はスキップ（部分カバーは後で確認）
                 pass
             if not y_wall_covers(x2, y_positions[0], y_positions[-1]):
                 pass
@@ -246,7 +237,6 @@ def detect_kiso_compartments(ifc, settings, rp):
             for yi in range(len(valid_y_positions) - 1):
                 y1, y2 = valid_y_positions[yi], valid_y_positions[yi + 1]
 
-                # 中間のX壁チェック（このX範囲をカバーする中間X壁があれば分割済み）
                 has_intermediate_x_wall = False
                 for yp in y_positions:
                     if y1 < yp < y2 and x_wall_covers(yp, x1, x2):
@@ -255,85 +245,56 @@ def detect_kiso_compartments(ifc, settings, rp):
                 if has_intermediate_x_wall:
                     continue
 
-                # 左右のY壁チェック
                 has_left = y_wall_covers(x1, y1, y2)
                 has_right = y_wall_covers(x2, y1, y2)
-
                 if has_left and has_right:
                     compartments.append({
                         "x_min": x1, "x_max": x2,
                         "y_min": y1, "y_max": y2,
-                        "width_x": x2 - x1,
-                        "width_y": y2 - y1,
+                        "width_x": x2 - x1, "width_y": y2 - y1,
                     })
 
     print(f"\n  検出された区画: {len(compartments)}個")
     for idx, c in enumerate(compartments):
         print(f"    区画{idx+1}: X=[{c['x_min']:.3f},{c['x_max']:.3f}] Y=[{c['y_min']:.3f},{c['y_max']:.3f}]"
-              f"  ({c['width_x']:.3f} x {c['width_y']:.3f})")
-
+              f" ({c['width_x']:.3f} x {c['width_y']:.3f})")
     return compartments
 
 
 ###############################################################################
 # 根太配置
 ###############################################################################
-
 def place_joists(compartments, rp, pitch=0.455):
-    """基礎区画ごとに根太を配置。
-
-    根太はslope_axis方向に走る。
-    ridge_axis方向にpitchで並ぶ。
-    区画の両端には必ず配置。
-
-    IFC座標系:
-      slope_axis="x" → 根太はIFC X方向に走る、IFC Yの方向にピッチで並ぶ
-      slope_axis="z" → 根太はIFC Y方向に走る(Three.jsのZ)、IFC Xの方向にピッチで並ぶ
-
-    Three.js座標系: IFC(X,Y,Z) → Three.js(X,Z,-Y)
-      slope_axis="x" → 根太はThree.js X方向に走る、Three.js Zの方向(-IFC_Y方向)にピッチで並ぶ
-      slope_axis="z" → 根太はThree.js Z方向(-IFC_Y)に走る、Three.js X方向にピッチで並ぶ
-    """
+    """基礎区画ごとに根太を配置。"""
     slope_axis = rp["slope_axis"]
     joists = []
-
     for comp_idx, comp in enumerate(compartments):
-        # 根太の方向（slope_axis方向）と並ぶ方向（ridge_axis方向）を特定
         if slope_axis == "x":
-            # 根太はIFC X方向に走る
-            joist_start = comp["x_min"]  # 根太の始点（IFC X）
-            joist_end = comp["x_max"]    # 根太の終点（IFC X）
-            pitch_start = comp["y_min"]  # ピッチ方向の始点（IFC Y）
-            pitch_end = comp["y_max"]    # ピッチ方向の終点（IFC Y）
+            joist_start = comp["x_min"]
+            joist_end = comp["x_max"]
+            pitch_start = comp["y_min"]
+            pitch_end = comp["y_max"]
         else:
-            # slope_axis == "z" → 根太はIFC Y方向に走る
-            joist_start = comp["y_min"]  # 根太の始点（IFC Y）
-            joist_end = comp["y_max"]    # 根太の終点（IFC Y）
-            pitch_start = comp["x_min"]  # ピッチ方向の始点（IFC X）
-            pitch_end = comp["x_max"]    # ピッチ方向の終点（IFC X）
+            joist_start = comp["y_min"]
+            joist_end = comp["y_max"]
+            pitch_start = comp["x_min"]
+            pitch_end = comp["x_max"]
 
         joist_length = abs(joist_end - joist_start)
-        pitch_span = abs(pitch_end - pitch_start)
 
-        # ピッチ方向に根太を配置
         positions = []
-
-        # 両端に必ず配置
         positions.append({"pos": pitch_start, "reason": "区画端部"})
         positions.append({"pos": pitch_end, "reason": "区画端部"})
 
-        # ピッチ間隔で配置（start側から）
         pos = pitch_start + pitch
-        while pos < pitch_end - 0.01:  # 端部と重複しないよう少しマージン
+        while pos < pitch_end - 0.01:
             positions.append({"pos": pos, "reason": "基本ピッチ"})
             pos += pitch
 
-        # 重複除去（近すぎるものはマージ）
         positions.sort(key=lambda p: p["pos"])
         merged = []
         for p in positions:
             if merged and abs(p["pos"] - merged[-1]["pos"]) < 0.03:
-                # 近い場合は端部優先
                 if p["reason"] == "区画端部":
                     merged[-1] = p
                 continue
@@ -349,54 +310,40 @@ def place_joists(compartments, rp, pitch=0.455):
                 "length": joist_length,
             }
             joists.append(joist)
-
     return joists
 
 
 ###############################################################################
 # 根太3Dライン生成
 ###############################################################################
-
 def generate_joist_lines(joists, rp):
-    """根太の3Dラインセグメント(Three.js座標)を生成。
-    根太はスラブ上面（Y≈0.172m）に配置。
-    IFC→Three.js: (X, Y, Z) → (X, Z, -Y)
-    """
+    """根太の3Dラインセグメント(Three.js座標)を生成。"""
     slope_axis = rp["slope_axis"]
-    slab_top_y = 0.172  # 1Fスラブ上面高さ（Three.js Y座標）
+    slab_top_y = 0.172
     lines = []
-
     for j in joists:
         if slope_axis == "x":
-            # 根太はThree.js X方向に走る
-            # IFC (X, Y, Z) → Three.js (X, Z, -Y)
-            # joist_start/end = IFC X, pos = IFC Y
             x1 = j["joist_start"]
             x2 = j["joist_end"]
-            z = -j["pos"]  # IFC Y → Three.js -Y = Three.js Z
+            z = -j["pos"]
             seg = [[x1, slab_top_y, z], [x2, slab_top_y, z]]
         else:
-            # slope_axis == "z" → 根太はIFC Y方向に走る
-            # joist_start/end = IFC Y, pos = IFC X
-            x = j["pos"]  # IFC X → Three.js X
-            z1 = -j["joist_start"]  # IFC Y → Three.js -Y
+            x = j["pos"]
+            z1 = -j["joist_start"]
             z2 = -j["joist_end"]
             seg = [[x, slab_top_y, z1], [x, slab_top_y, z2]]
-
         lines.append({
             "seg": seg,
             "length_m": round(j["length"], 3),
             "reason": j["reason"],
             "comp_idx": j["comp_idx"],
         })
-
     return lines
 
 
 ###############################################################################
 # メイン関数
 ###############################################################################
-
 def main():
     if len(sys.argv) < 3:
         print("Usage: python build_neda_viewer.py <input.ifc> <output.html>")
@@ -404,8 +351,8 @@ def main():
 
     IFC_PATH = sys.argv[1]
     OUTPUT_HTML = sys.argv[2]
-
     model_name = os.path.splitext(os.path.basename(IFC_PATH))[0]
+
     print(f"=== 根太拾い: {model_name} ===")
     print(f"  IFC: {IFC_PATH}")
 
@@ -444,13 +391,12 @@ def main():
             for i in range(0, len(vf), 3):
                 verts.extend([vf[i], vf[i+2], -vf[i+1]])
             faces = list(ff)
-            meshes.append({"cat": cat, "name": ename, "gid": gid,
-                           "verts": verts, "faces": faces})
+            meshes.append({"cat": cat, "name": ename, "gid": gid, "verts": verts, "faces": faces})
         except Exception:
             pass
     print(f"  建物ジオメトリ: {len(meshes)}個")
 
-    # === Part 2: 屋根パラメータ検出（根太の方向を決定） ===
+    # === Part 2: 屋根パラメータ検出 ===
     print("\n屋根パラメータ検出中...")
     rp = detect_roof_params(ifc, settings)
     if rp is None:
@@ -467,19 +413,16 @@ def main():
     # === Part 4-5: ピッチ別に根太配置＆ライン生成 ===
     all_pitch_data = {}
     first_pitch = True
-
     for pitch in JOIST_PITCHES:
         pitch_mm = int(pitch * 1000)
         print(f"\n根太配置計算中... (ピッチ: {pitch_mm}mm)")
         joists = place_joists(compartments, rp, pitch=pitch)
         print(f"  配置位置: {len(joists)}箇所")
-
         joist_lines = generate_joist_lines(joists, rp)
         print(f"  根太ライン: {len(joist_lines)}本")
 
         total_count = len(joist_lines)
         total_length = sum(j["length_m"] for j in joist_lines)
-
         count_by_reason = defaultdict(int)
         length_by_reason = defaultdict(float)
         count_by_comp = defaultdict(int)
@@ -513,7 +456,6 @@ def main():
             "pitch": pitch_mm,
             "compartment_count": len(compartments),
         }
-
         all_pitch_data[pitch_mm] = {
             "joists": joists,
             "joist_lines": joist_lines,
@@ -526,13 +468,11 @@ def main():
     meshes_json = json.dumps(meshes, ensure_ascii=False)
     colors_json = json.dumps(CATEGORY_COLORS, ensure_ascii=False)
 
-    # 区画情報をJSON化（Three.js座標系）
     comp_data = []
     for c in compartments:
-        # IFC座標 → Three.js座標: (X, Y, Z) → (X, Z, -Y)
         comp_data.append({
             "x_min": c["x_min"], "x_max": c["x_max"],
-            "z_min": -c["y_max"], "z_max": -c["y_min"],  # IFC Y → Three.js -Z
+            "z_min": -c["y_max"], "z_max": -c["y_min"],
             "width_x": c["width_x"], "width_y": c["width_y"],
         })
     compartments_json = json.dumps(comp_data, ensure_ascii=False)
@@ -546,8 +486,8 @@ def main():
     pitch_data_json = json.dumps(pitch_data_for_html, ensure_ascii=False)
     pitches_json = json.dumps([int(p * 1000) for p in JOIST_PITCHES])
 
-    html = generate_html(meshes_json, pitch_data_json, pitches_json,
-                         default_pitch, colors_json, compartments_json, model_name)
+    html = generate_html(meshes_json, pitch_data_json, pitches_json, default_pitch,
+                         colors_json, compartments_json, model_name)
 
     os.makedirs(os.path.dirname(OUTPUT_HTML) or ".", exist_ok=True)
     with open(OUTPUT_HTML, 'w', encoding='utf-8') as f:
@@ -575,9 +515,8 @@ def main():
 ###############################################################################
 # HTML生成
 ###############################################################################
-
-def generate_html(meshes_json, pitch_data_json, pitches_json,
-                  default_pitch, colors_json, compartments_json, model_name=""):
+def generate_html(meshes_json, pitch_data_json, pitches_json, default_pitch,
+                  colors_json, compartments_json, model_name=""):
     return f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -595,11 +534,13 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 #legend div:hover {{ background:rgba(255,255,255,0.15); }}
 .cb {{ display:inline-block; width:14px; height:14px; border-radius:3px; margin-right:6px; vertical-align:middle; }}
 #neda-info {{ position:fixed; bottom:10px; left:10px; color:#fff; background:rgba(0,0,0,0.85);
-  padding:14px 18px; border-radius:8px; font-size:13px; z-index:100; line-height:1.6; max-width:450px;
-  max-height:50vh; overflow-y:auto; }}
-#controls {{ position:fixed; bottom:10px; right:10px; z-index:100; display:flex; flex-wrap:wrap; gap:4px; align-items:center; }}
-#controls button {{ background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3);
-  padding:8px 14px; border-radius:6px; cursor:pointer; font-size:12px; }}
+  padding:14px 18px; border-radius:8px; font-size:13px; z-index:100; line-height:1.6;
+  max-width:450px; max-height:50vh; overflow-y:auto; }}
+#controls {{ position:fixed; bottom:10px; right:10px; z-index:100;
+  display:flex; flex-wrap:wrap; gap:4px; align-items:center; }}
+#controls button {{ background:rgba(255,255,255,0.15); color:#fff;
+  border:1px solid rgba(255,255,255,0.3); padding:8px 14px; border-radius:6px;
+  cursor:pointer; font-size:12px; }}
 #controls button:hover {{ background:rgba(255,255,255,0.3); }}
 #controls button.active {{ background:rgba(79,195,247,0.5); border-color:#4fc3f7; }}
 #pitch-group {{ display:flex; gap:2px; margin-right:8px; }}
@@ -610,6 +551,13 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 <div id="info">
   <h3>根太拾い 3Dビューア</h3>
   <div>左ドラッグ: 回転 / 右ドラッグ: 移動 / ホイール: ズーム</div>
+  <div id="sm-status" style="margin-top:4px;font-size:11px;color:#888;">
+    <span id="sm-icon" style="color:#666;">○</span>
+    <span id="sm-text">3Dマウス未接続</span>
+    <button id="btn-sm-connect" onclick="connectSpaceMouse()"
+      style="margin-left:6px;font-size:10px;padding:2px 8px;background:rgba(79,195,247,0.3);
+      color:#4fc3f7;border:1px solid #4fc3f7;border-radius:4px;cursor:pointer;">接続</button>
+  </div>
   <div id="sel-info" style="margin-top:6px;color:#aaa;">クリックで部材選択</div>
 </div>
 <div id="neda-info"></div>
@@ -630,24 +578,21 @@ const PITCHES={pitches_json};
 const DEFAULT_PITCH={default_pitch};
 const COLORS={colors_json};
 const COMPARTMENTS={compartments_json};
-
 let currentPitch=DEFAULT_PITCH;
 
 const REASON_COLORS = {{
   "基本ピッチ": 0x4fc3f7,
   "区画端部": 0x00e676,
 }};
-
-// 区画ごとの色
-const COMP_COLORS = [0xff6b6b, 0x51cf66, 0x339af0, 0xfcc419, 0xcc5de8,
-                      0x20c997, 0xff922b, 0x845ef7, 0xe64980];
+const COMP_COLORS = [0xff6b6b,0x51cf66,0x339af0,0xfcc419,0xcc5de8,0x20c997,0xff922b,0x845ef7,0xe64980];
 
 const W=innerWidth, H=innerHeight;
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0x1a1a2e);
 const camera=new THREE.PerspectiveCamera(50,W/H,0.01,1000);
 const renderer=new THREE.WebGLRenderer({{antialias:true}});
-renderer.setSize(W,H); renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(W,H);
+renderer.setPixelRatio(devicePixelRatio);
 document.body.appendChild(renderer.domElement);
 
 scene.add(new THREE.AmbientLight(0xffffff,0.5));
@@ -655,63 +600,189 @@ const dl=new THREE.DirectionalLight(0xffffff,0.7); dl.position.set(5,10,5); scen
 const dl2=new THREE.DirectionalLight(0xffffff,0.3); dl2.position.set(-5,5,-5); scene.add(dl2);
 
 class Orbit{{
-constructor(c,e){{this.c=c;this.e=e;this.t=new THREE.Vector3();this.s=new THREE.Spherical();
-this._d=0;this._st=0;this._sv=new THREE.Vector2();
-e.addEventListener('mousedown',ev=>{{this._st=ev.button===0?1:ev.button===2?2:0;this._sv.set(ev.clientX,ev.clientY);
-const mm=ev2=>{{const dx=ev2.clientX-this._sv.x,dy=ev2.clientY-this._sv.y;this._sv.set(ev2.clientX,ev2.clientY);
-if(this._st===1)this._rot(dx,dy);else if(this._st===2)this._pan(dx,dy);}};
-const mu=()=>{{this._st=0;document.removeEventListener('mousemove',mm);document.removeEventListener('mouseup',mu);}};
-document.addEventListener('mousemove',mm);document.addEventListener('mouseup',mu);}});
-e.addEventListener('wheel',ev=>{{ev.preventDefault();this._zm(ev.deltaY>0?1.1:0.9);}},{{passive:false}});
-e.addEventListener('contextmenu',ev=>ev.preventDefault());
-let td=0;e.addEventListener('touchstart',ev=>{{ev.preventDefault();if(ev.touches.length===1){{this._st=1;this._sv.set(ev.touches[0].clientX,ev.touches[0].clientY);}}
-else if(ev.touches.length===2){{this._st=3;td=Math.hypot(ev.touches[1].clientX-ev.touches[0].clientX,ev.touches[1].clientY-ev.touches[0].clientY);}}}},{{passive:false}});
-e.addEventListener('touchmove',ev=>{{ev.preventDefault();if(this._st===1&&ev.touches.length===1){{const dx=ev.touches[0].clientX-this._sv.x,dy=ev.touches[0].clientY-this._sv.y;
-this._sv.set(ev.touches[0].clientX,ev.touches[0].clientY);this._rot(dx,dy);}}else if(this._st===3&&ev.touches.length===2){{
-const d=Math.hypot(ev.touches[1].clientX-ev.touches[0].clientX,ev.touches[1].clientY-ev.touches[0].clientY);this._zm(td/d);td=d;}}}},{{passive:false}});
-e.addEventListener('touchend',()=>{{this._st=0;}});this.initSM();}}
-_rot(dx,dy){{const o=this.c.position.clone().sub(this.t);this.s.setFromVector3(o);this.s.theta-=dx*0.008;this.s.phi-=dy*0.008;
-this.s.phi=Math.max(0.01,Math.min(Math.PI-0.01,this.s.phi));o.setFromSpherical(this.s);this.c.position.copy(this.t).add(o);this.c.lookAt(this.t);}}
-_pan(dx,dy){{const d=this.c.position.distanceTo(this.t)*0.001;const r=new THREE.Vector3().setFromMatrixColumn(this.c.matrix,0);
-const u=new THREE.Vector3().setFromMatrixColumn(this.c.matrix,1);const p=r.multiplyScalar(-dx*d).add(u.multiplyScalar(dy*d));
-this.c.position.add(p);this.t.add(p);this.c.lookAt(this.t);}}
-_zm(f){{const o=this.c.position.clone().sub(this.t);o.multiplyScalar(f);this.c.position.copy(this.t).add(o);this.c.lookAt(this.t);}}
-initSM(){{this._smDev=null;this._smV=new Float32Array(6);
-this._smBtn=document.createElement('button');this._smBtn.textContent='🎮 3D Mouse接続';
-this._smBtn.style.cssText='position:fixed;bottom:10px;right:10px;z-index:9999;background:#1565c0;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;opacity:0.85;';
-this._smBtn.addEventListener('click',async()=>{{
-try{{const devs=await navigator.hid.requestDevice({{filters:[{{vendorId:0x046d,productId:0xc626}}]}});
-if(!devs.length)return;const dev=devs[0];if(!dev.opened)await dev.open();this._smDev=dev;
-this._smBtn.textContent='✅ '+dev.productName;this._smBtn.style.background='#1b5e20';
-dev.addEventListener('inputreport',ev=>{{const d=ev.data,id=ev.reportId;
-if(id===1&&d.byteLength>=6){{this._smV[0]=d.getInt16(0,true);this._smV[1]=d.getInt16(2,true);this._smV[2]=d.getInt16(4,true);}}
-else if(id===2&&d.byteLength>=6){{this._smV[3]=d.getInt16(0,true);this._smV[4]=d.getInt16(2,true);this._smV[5]=d.getInt16(4,true);}}
-}});}}catch(e){{this._smBtn.textContent='❌ '+e.message;this._smBtn.style.background='#b71c1c';}}
-}});document.body.appendChild(this._smBtn);
-if(navigator.hid)navigator.hid.getDevices().then(devs=>{{const d=devs.find(d=>d.vendorId===0x046d&&d.productId===0xc626);
-if(d){{if(!d.opened)d.open().then(()=>this._setupHID(d));else this._setupHID(d);}}
-}});}}
-_setupHID(dev){{this._smDev=dev;this._smBtn.textContent='✅ '+dev.productName;this._smBtn.style.background='#1b5e20';
-dev.addEventListener('inputreport',ev=>{{const d=ev.data,id=ev.reportId;
-if(id===1&&d.byteLength>=6){{this._smV[0]=d.getInt16(0,true);this._smV[1]=d.getInt16(2,true);this._smV[2]=d.getInt16(4,true);}}
-else if(id===2&&d.byteLength>=6){{this._smV[3]=d.getInt16(0,true);this._smV[4]=d.getInt16(2,true);this._smV[5]=d.getInt16(4,true);}}
-}});}}
-pollSM(){{if(!this._smDev)return;const v=this._smV,dz=15;
-const tx=Math.abs(v[0])>dz?v[0]:0,ty=Math.abs(v[1])>dz?v[1]:0,tz=Math.abs(v[2])>dz?v[2]:0;
-const rx=Math.abs(v[3])>dz?v[3]:0,ry=Math.abs(v[4])>dz?v[4]:0;
-if(tx||tz)this._pan(tx*0.025,-tz*0.025);if(ty)this._zm(1+ty*0.00008);if(rx||ry)this._rot(-ry*0.018,rx*0.018);}}
+  constructor(c,e){{
+    this.c=c;this.e=e;this.t=new THREE.Vector3();this.s=new THREE.Spherical();
+    this._d=0;this._st=0;this._sv=new THREE.Vector2();
+    e.addEventListener('mousedown',ev=>{{
+      this._st=ev.button===0?1:ev.button===2?2:0;
+      this._sv.set(ev.clientX,ev.clientY);
+      const mm=ev2=>{{
+        const dx=ev2.clientX-this._sv.x,dy=ev2.clientY-this._sv.y;
+        this._sv.set(ev2.clientX,ev2.clientY);
+        if(this._st===1)this._rot(dx,dy);
+        else if(this._st===2)this._pan(dx,dy);
+      }};
+      const mu=()=>{{this._st=0;document.removeEventListener('mousemove',mm);document.removeEventListener('mouseup',mu);}};
+      document.addEventListener('mousemove',mm);document.addEventListener('mouseup',mu);
+    }});
+    e.addEventListener('wheel',ev=>{{ev.preventDefault();this._zm(ev.deltaY>0?1.1:0.9);}},{{passive:false}});
+    e.addEventListener('contextmenu',ev=>ev.preventDefault());
+    let td=0;
+    e.addEventListener('touchstart',ev=>{{
+      ev.preventDefault();
+      if(ev.touches.length===1){{this._st=1;this._sv.set(ev.touches[0].clientX,ev.touches[0].clientY);}}
+      else if(ev.touches.length===2){{this._st=3;td=Math.hypot(ev.touches[1].clientX-ev.touches[0].clientX,ev.touches[1].clientY-ev.touches[0].clientY);}}
+    }},{{passive:false}});
+    e.addEventListener('touchmove',ev=>{{
+      ev.preventDefault();
+      if(this._st===1&&ev.touches.length===1){{
+        const dx=ev.touches[0].clientX-this._sv.x,dy=ev.touches[0].clientY-this._sv.y;
+        this._sv.set(ev.touches[0].clientX,ev.touches[0].clientY);this._rot(dx,dy);
+      }}else if(this._st===3&&ev.touches.length===2){{
+        const d=Math.hypot(ev.touches[1].clientX-ev.touches[0].clientX,ev.touches[1].clientY-ev.touches[0].clientY);
+        this._zm(td/d);td=d;
+      }}
+    }},{{passive:false}});
+    e.addEventListener('touchend',()=>{{this._st=0;}});
+  }}
+  _rot(dx,dy){{
+    const o=this.c.position.clone().sub(this.t);this.s.setFromVector3(o);
+    this.s.theta-=dx*0.008;this.s.phi-=dy*0.008;
+    this.s.phi=Math.max(0.01,Math.min(Math.PI-0.01,this.s.phi));
+    o.setFromSpherical(this.s);this.c.position.copy(this.t).add(o);this.c.lookAt(this.t);
+  }}
+  _pan(dx,dy){{
+    const d=this.c.position.distanceTo(this.t)*0.001;
+    const r=new THREE.Vector3().setFromMatrixColumn(this.c.matrix,0);
+    const u=new THREE.Vector3().setFromMatrixColumn(this.c.matrix,1);
+    const p=r.multiplyScalar(-dx*d).add(u.multiplyScalar(dy*d));
+    this.c.position.add(p);this.t.add(p);this.c.lookAt(this.t);
+  }}
+  _zm(f){{
+    const o=this.c.position.clone().sub(this.t);o.multiplyScalar(f);
+    this.c.position.copy(this.t).add(o);this.c.lookAt(this.t);
+  }}
 }}
+
+// ===== 3D Mouse (SpaceMouse) Support =====
+// Method 1: WebHID (primary - direct device access, bypasses 3DxWare driver)
+// Method 2: Gamepad API (fallback)
+const SM_STATE = {{ tx:0,ty:0,tz:0, rx:0,ry:0,rz:0, connected:false, method:'' }};
+const SM_CFG = {{
+  // 感度設定（WebHID: デバイス値 -350〜+350）
+  hidPanScale:   0.0004,   // WebHID パン感度
+  hidZoomScale:  0.000015, // WebHID ズーム感度
+  hidRotScale:   0.0008,   // WebHID 回転感度
+  hidDeadzone:   5,        // WebHID デッドゾーン（±5以内は0）
+  // Gamepad API: 値 -1〜+1
+  gpPanScale:  1.5,
+  gpZoomScale: 0.008,
+  gpRotScale:  2.5,
+  gpDeadzone:  0.03,
+}};
+let smHidDevice = null;
+let smGpIdx = -1;
+
+function smUpdateUI(connected, method, name){{
+  document.getElementById('sm-icon').style.color = connected ? '#00e676' : '#666';
+  document.getElementById('sm-icon').textContent = connected ? '●' : '○';
+  const label = connected ? '3Dマウス接続中 ('+method+')' : '3Dマウス未接続';
+  document.getElementById('sm-text').textContent = label;
+  document.getElementById('btn-sm-connect').style.display = connected ? 'none' : '';
+  if(name) console.log('SpaceMouse:', method, name);
+}}
+
+// --- WebHID ---
+async function connectSpaceMouse(){{
+  if(!navigator.hid) {{
+    alert('このブラウザはWebHIDに対応していません。\\nChrome 89以降をお使いください。');
+    return;
+  }}
+  try {{
+    // 3Dconnexion vendorId: 0x256f (新型), 0x046d (Logitech/旧型)
+    const devices = await navigator.hid.requestDevice({{
+      filters: [
+        {{ vendorId: 0x256f }},
+        {{ vendorId: 0x046d }}
+      ]
+    }});
+    if(devices.length === 0) return;
+    const device = devices[0];
+    if(!device.opened) await device.open();
+    smHidDevice = device;
+    SM_STATE.connected = true;
+    SM_STATE.method = 'WebHID';
+    smUpdateUI(true, 'WebHID', device.productName);
+
+    device.addEventListener('inputreport', e => {{
+      const data = new Int16Array(e.data.buffer);
+      if(e.reportId === 1) {{
+        // Translation: X(横), Y(前後=zoom), Z(上下)
+        SM_STATE.tx = Math.abs(data[0]) > SM_CFG.hidDeadzone ? data[0] : 0;
+        SM_STATE.ty = Math.abs(data[1]) > SM_CFG.hidDeadzone ? data[1] : 0;
+        SM_STATE.tz = Math.abs(data[2]) > SM_CFG.hidDeadzone ? data[2] : 0;
+      }} else if(e.reportId === 2) {{
+        // Rotation: Pitch(前傾), Roll(傾き), Yaw(左右回転)
+        SM_STATE.rx = Math.abs(data[0]) > SM_CFG.hidDeadzone ? data[0] : 0;
+        SM_STATE.ry = Math.abs(data[1]) > SM_CFG.hidDeadzone ? data[1] : 0;
+        SM_STATE.rz = Math.abs(data[2]) > SM_CFG.hidDeadzone ? data[2] : 0;
+      }}
+    }});
+  }} catch(err) {{
+    console.warn('WebHID connection failed:', err);
+    // WebHID失敗 → Gamepad APIフォールバックを案内
+    smUpdateUI(false);
+  }}
+}}
+
+// --- Gamepad API (fallback) ---
+window.addEventListener('gamepadconnected', e=>{{
+  const gp=e.gamepad;
+  if(!SM_STATE.connected && gp.axes.length>=6){{
+    smGpIdx=gp.index;
+    SM_STATE.connected=true;
+    SM_STATE.method='Gamepad';
+    smUpdateUI(true, 'Gamepad', gp.id);
+  }}
+}});
+window.addEventListener('gamepaddisconnected', e=>{{
+  if(e.gamepad.index===smGpIdx){{
+    smGpIdx=-1;
+    if(SM_STATE.method==='Gamepad'){{
+      SM_STATE.connected=false;
+      SM_STATE.method='';
+      smUpdateUI(false);
+    }}
+  }}
+}});
+
+function pollSM(){{
+  if(!SM_STATE.connected) return;
+
+  if(SM_STATE.method==='WebHID'){{
+    // WebHID: SM_STATEは inputreport イベントで更新済み
+    const s = SM_CFG;
+    if(SM_STATE.tx || SM_STATE.tz)
+      controls._pan(-SM_STATE.tx * s.hidPanScale * 100, -SM_STATE.tz * s.hidPanScale * 100);
+    if(SM_STATE.ty)
+      controls._zm(1 + SM_STATE.ty * s.hidZoomScale);
+    if(SM_STATE.rz || SM_STATE.rx)
+      controls._rot(-SM_STATE.rz * s.hidRotScale * 10, SM_STATE.rx * s.hidRotScale * 10);
+  }}
+  else if(SM_STATE.method==='Gamepad'){{
+    // Gamepad API fallback
+    const gp=navigator.getGamepads()[smGpIdx];
+    if(!gp || gp.axes.length<6) return;
+    const dz=SM_CFG.gpDeadzone;
+    const a=gp.axes.map(v=>Math.abs(v)<dz?0:v);
+    if(a[0]||a[2]) controls._pan(-a[0]*SM_CFG.gpPanScale, a[2]*SM_CFG.gpPanScale);
+    if(a[1]) controls._zm(1+a[1]*SM_CFG.gpZoomScale);
+    if(a[5]||a[3]) controls._rot(a[5]*SM_CFG.gpRotScale, a[3]*SM_CFG.gpRotScale);
+  }}
+}}
+// ===== End 3D Mouse Support =====
 
 const buildingGroup=new THREE.Group();
 const catGroups={{}};const allMeshes=[];const bbox=new THREE.Box3();
 MESHES.forEach(m=>{{
-const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(m.verts,3));
-g.setIndex(m.faces);g.computeVertexNormals();
-const color=COLORS[m.cat]||'#999';
-const mat=new THREE.MeshLambertMaterial({{color:new THREE.Color(color),transparent:true,opacity:0.2,side:THREE.DoubleSide,depthWrite:false}});
-const mesh=new THREE.Mesh(g,mat);mesh.userData={{cat:m.cat,name:m.name,gid:m.gid}};
-if(!catGroups[m.cat]){{catGroups[m.cat]=new THREE.Group();buildingGroup.add(catGroups[m.cat]);}}
-catGroups[m.cat].add(mesh);allMeshes.push(mesh);bbox.expandByObject(mesh);
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(m.verts,3));
+  g.setIndex(m.faces);g.computeVertexNormals();
+  const color=COLORS[m.cat]||'#999';
+  const mat=new THREE.MeshLambertMaterial({{color:new THREE.Color(color),transparent:true,opacity:0.2,side:THREE.DoubleSide,depthWrite:false}});
+  const mesh=new THREE.Mesh(g,mat);mesh.userData={{cat:m.cat,name:m.name,gid:m.gid}};
+  if(!catGroups[m.cat]){{catGroups[m.cat]=new THREE.Group();buildingGroup.add(catGroups[m.cat]);}}
+  catGroups[m.cat].add(mesh);allMeshes.push(mesh);bbox.expandByObject(mesh);
 }});
 scene.add(buildingGroup);
 
@@ -728,7 +799,6 @@ COMPARTMENTS.forEach((c,i)=>{{
   mesh.rotation.x=-Math.PI/2;
   mesh.position.set((c.x_min+c.x_max)/2, slabY+0.005, (c.z_min+c.z_max)/2);
   compGroup.add(mesh);
-  // 区画枠線
   const pts=[
     new THREE.Vector3(c.x_min, slabY+0.01, c.z_min),
     new THREE.Vector3(c.x_max, slabY+0.01, c.z_min),
@@ -744,7 +814,6 @@ COMPARTMENTS.forEach((c,i)=>{{
 // 根太ライン描画
 const nedaGroup=new THREE.Group();
 scene.add(nedaGroup);
-
 function buildNedaLines(pitchMm){{
   while(nedaGroup.children.length>0) nedaGroup.remove(nedaGroup.children[0]);
   const pd=PITCH_DATA[pitchMm];
@@ -759,7 +828,6 @@ function buildNedaLines(pitchMm){{
     line.userData={{reason:j.reason,length:j.length_m,comp_idx:j.comp_idx}};
     nedaGroup.add(line);
   }});
-  // 集計表示更新
   const S=pd.summary;
   let h='<b style="font-size:14px;">根太積算</b><br><br>';
   h+=`ピッチ: ${{S.pitch}}mm<br>`;
@@ -801,7 +869,6 @@ PITCHES.forEach(p=>{{
   if(p===DEFAULT_PITCH) b.classList.add('active');
   pg.appendChild(b);
 }});
-
 buildNedaLines(DEFAULT_PITCH);
 
 const center=new THREE.Vector3();bbox.getCenter(center);
@@ -811,24 +878,27 @@ const controls=new Orbit(camera,renderer.domElement);
 controls.t.copy(center);camera.lookAt(center);
 
 function resetCam(){{
-camera.position.set(center.x+maxDim*0.8,center.y+maxDim*0.6,center.z+maxDim*0.8);
-controls.t.copy(center);camera.lookAt(center);}}
+  camera.position.set(center.x+maxDim*0.8,center.y+maxDim*0.6,center.z+maxDim*0.8);
+  controls.t.copy(center);camera.lookAt(center);
+}}
 
 const leg=document.getElementById('legend');
 [...new Set(MESHES.map(m=>m.cat))].forEach(cat=>{{
-const d=document.createElement('div');d.innerHTML='<span class="cb" style="background:'+(COLORS[cat]||'#999')+'"></span>'+cat;
-d.onclick=()=>{{if(catGroups[cat]){{catGroups[cat].visible=!catGroups[cat].visible;d.style.opacity=catGroups[cat].visible?1:0.3;}}}};
-leg.appendChild(d);
+  const d=document.createElement('div');
+  d.innerHTML='<span class="cb" style="background:'+(COLORS[cat]||'#999')+'"></span>'+cat;
+  d.onclick=()=>{{if(catGroups[cat]){{catGroups[cat].visible=!catGroups[cat].visible;d.style.opacity=catGroups[cat].visible?1:0.3;}}}};
+  leg.appendChild(d);
 }});
 
 const rc=new THREE.Raycaster(),mouse=new THREE.Vector2();let selMesh=null;
 renderer.domElement.addEventListener('click',e=>{{
-mouse.x=(e.clientX/W)*2-1;mouse.y=-(e.clientY/H)*2+1;rc.setFromCamera(mouse,camera);
-const hits=rc.intersectObjects(allMeshes);
-if(selMesh){{selMesh.material.emissive.setHex(0);selMesh=null;}}
-if(hits.length>0){{selMesh=hits[0].object;selMesh.material.emissive.setHex(0x333333);
-document.getElementById('sel-info').textContent=selMesh.userData.cat+' / '+selMesh.userData.name;}}
-else{{document.getElementById('sel-info').textContent='クリックで部材選択';}}}});
+  mouse.x=(e.clientX/W)*2-1;mouse.y=-(e.clientY/H)*2+1;rc.setFromCamera(mouse,camera);
+  const hits=rc.intersectObjects(allMeshes);
+  if(selMesh){{selMesh.material.emissive.setHex(0);selMesh=null;}}
+  if(hits.length>0){{selMesh=hits[0].object;selMesh.material.emissive.setHex(0x333333);
+    document.getElementById('sel-info').textContent=selMesh.userData.cat+' / '+selMesh.userData.name;}}
+  else{{document.getElementById('sel-info').textContent='クリックで部材選択';}}
+}});
 
 let showN=true,showC=true,showB=true;
 function toggleNeda(){{showN=!showN;nedaGroup.visible=showN;document.getElementById('btn-neda').classList.toggle('active',showN);}}
@@ -836,7 +906,10 @@ function toggleComp(){{showC=!showC;compGroup.visible=showC;document.getElementB
 function toggleBuilding(){{showB=!showB;buildingGroup.visible=showB;document.getElementById('btn-building').classList.toggle('active',showB);}}
 
 const grid=new THREE.GridHelper(20,40,0x444444,0x333333);grid.position.copy(center);grid.position.y=0;scene.add(grid);
-(function anim(){{requestAnimationFrame(anim);controls.pollSM();renderer.render(scene,camera);}})();
+
+// Animation loop with 3D Mouse polling
+(function anim(){{requestAnimationFrame(anim);pollSM();renderer.render(scene,camera);}})();
+
 addEventListener('resize',()=>{{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);}});
 </script>
 </body>
