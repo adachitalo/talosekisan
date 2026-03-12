@@ -120,6 +120,14 @@ def validate_dimensions(marker: str, frame_w: float, frame_h: float, tolerance: 
     if abs(fw - spec_w) <= tolerance and abs(fh - spec_h) <= tolerance:
         return None  # OK
 
+    # 同じベースコードの別サイズバリエーションもチェック
+    # 例: "VMSD" で最初に (1505,2019) にマッチしたが、実際は "VMSD 1810x2019" かもしれない
+    base_upper = (matched_code or base).split()[0].upper()
+    for code, (sw, sh) in SIZE_MASTER.items():
+        if code.upper().startswith(base_upper) and code != matched_code:
+            if abs(fw - sw) <= tolerance and abs(fh - sh) <= tolerance:
+                return None  # 同品番の別サイズにマッチ → エラーではない
+
     # 不一致 → 実寸法から正しい品番を逆引き
     actual_key = f"{fw}x{fh}"
     suggestion = _SIZE_TO_CODE.get(actual_key, [])
@@ -541,8 +549,8 @@ def detect_fixtures_and_frames(ifc_file):
             w_m = ifc_w / 1000.0
             h_m = ifc_h / 1000.0
 
-            # 規格寸法チェック
-            dim_error = validate_dimensions(label, frame_w, frame_h)
+            # 規格寸法チェック（SIZE_MASTERはIFC寸法基準なのでオフセット前で照合）
+            dim_error = validate_dimensions(label, ifc_w, ifc_h)
 
             fixtures_info.append({
                 "label": label,
