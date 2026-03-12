@@ -551,13 +551,6 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 <div id="info">
   <h3>根太拾い 3Dビューア</h3>
   <div>左ドラッグ: 回転 / 右ドラッグ: 移動 / ホイール: ズーム</div>
-  <div id="sm-status" style="margin-top:4px;font-size:11px;color:#888;">
-    <span id="sm-icon" style="color:#666;">○</span>
-    <span id="sm-text">3Dマウス未接続</span>
-    <button id="btn-sm-connect" onclick="connectSpaceMouse()"
-      style="margin-left:6px;font-size:10px;padding:2px 8px;background:rgba(79,195,247,0.3);
-      color:#4fc3f7;border:1px solid #4fc3f7;border-radius:4px;cursor:pointer;">接続</button>
-  </div>
   <div id="sel-info" style="margin-top:6px;color:#aaa;">クリックで部材選択</div>
 </div>
 <div id="neda-info"></div>
@@ -568,6 +561,10 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
   <button id="btn-comp" class="active" onclick="toggleComp()">区画表示</button>
   <button id="btn-building" class="active" onclick="toggleBuilding()">建物表示</button>
   <button onclick="resetCam()">リセット</button>
+  <button id="btn-sm-connect" onclick="connectSpaceMouse()" title="3Dマウス接続"
+    style="position:relative;">
+    <span id="sm-icon">🎮</span><span id="sm-text" style="font-size:10px;margin-left:2px;">3D</span>
+  </button>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -674,11 +671,20 @@ let smHidDevice = null;
 let smGpIdx = -1;
 
 function smUpdateUI(connected, method, name){{
-  document.getElementById('sm-icon').style.color = connected ? '#00e676' : '#666';
-  document.getElementById('sm-icon').textContent = connected ? '●' : '○';
-  const label = connected ? '3Dマウス接続中 ('+method+')' : '3Dマウス未接続';
-  document.getElementById('sm-text').textContent = label;
-  document.getElementById('btn-sm-connect').style.display = connected ? 'none' : '';
+  const btn = document.getElementById('btn-sm-connect');
+  const icon = document.getElementById('sm-icon');
+  const txt = document.getElementById('sm-text');
+  if(connected){{
+    btn.style.background = 'rgba(0,230,118,0.5)';
+    btn.style.borderColor = '#00e676';
+    icon.textContent = '✓';
+    txt.textContent = '';
+  }} else {{
+    btn.style.background = '';
+    btn.style.borderColor = '';
+    icon.textContent = '🎮';
+    txt.textContent = '3D';
+  }}
   if(name) console.log('SpaceMouse:', method, name);
 }}
 
