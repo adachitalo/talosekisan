@@ -577,80 +577,111 @@ def detect_2f_compartments(ifc, settings):
     print(f"    Y方向境界（X方向ログ壁）: {sorted(wall_y_boundaries)}")
 
     # =====================================================================
-    # 区画グリッド生成（ログ壁 + 集成梁）
+    # 区画グリッド生成（ログ壁ベース → 梁はセル交差時のみ分割）
     # =====================================================================
-    # X方向境界: スラブ端 + ログ壁(Y方向) + 梁(Y方向)のX中心
-    # Y方向境界: スラブ端 + ログ壁(X方向)
-    beam_x_positions = set()
-    beam_y_positions = set()
-    for b in beam_2f:
-        bcx = round((b["x_min"] + b["x_max"]) / 2, 3)
-        bcy = round((b["y_min"] + b["y_max"]) / 2, 3)
-        if b["dir"] == "y":
-            # Y方向梁 → X境界（スラブ内のもののみ）
-            if all_x_min + edge_tol < bcx < all_x_max - edge_tol:
-                beam_x_positions.add(bcx)
-        else:
-            # X方向梁 → Y境界
-            if all_y_min + edge_tol < bcy < all_y_max - edge_tol:
-                beam_y_positions.add(bcy)
+    # Step 1: ログ壁のみでベースグリッドを作成
+    x_bounds = sorted(set([all_x_min] + list(wall_x_boundaries) + [all_x_max]))
+    y_bounds = sorted(set([all_y_min] + list(wall_y_boundaries) + [all_y_max]))
 
-    x_bounds = sorted(set([all_x_min] + list(wall_x_boundaries) +
-                          list(beam_x_positions) + [all_x_max]))
-    y_bounds = sorted(set([all_y_min] + list(wall_y_boundaries) +
-                          list(beam_y_positions) + [all_y_max]))
-
-    print(f"\n  区画グリッド:")
+    print(f"\n  ログ壁ベースグリッド:")
     print(f"    X境界: {[round(x,3) for x in x_bounds]}")
     print(f"    Y境界: {[round(y,3) for y in y_bounds]}")
 
-    # グリッドセルから区画を生成（根太方向のスパンが4m超の場合は分割）
-    compartments = []
+    # Step 2: ベースグリッドのセルを生成
+    base_cells = []
     for xi in range(len(x_bounds) - 1):
         for yi in range(len(y_bounds) - 1):
             x1, x2 = x_bounds[xi], x_bounds[xi + 1]
             y1, y2 = y_bounds[yi], y_bounds[yi + 1]
-            wx = x2 - x1
-            wy = y2 - y1
-            if wx < 0.1 or wy < 0.1:
+            if x2 - x1 < 0.1 or y2 - y1 < 0.1:
                 continue
+            base_cells.append((x1, x2, y1, y2))
 
-            # 根太方向のスパンが4m超なら分割
-            if joist_dir == "x":
-                joist_span = wx
+    # Step 3: 各梁について、実際に交差するセルのみ分割
+    # 梁の実際のXY範囲を考慮して交差判定
+    beam_margin = 0.3  # 梁の存在範囲の余裕
+    for b in beam_2f:
+        bcx = round((b["x_min"] + b["x_max"]) / 2, 3)
+        bcy = round((b["y_min"] + b["y_max"]) / 2, 3)
+        new_cells = []
+        for (x1, x2, y1, y2) in base_cells:
+            split_done = False
+            if b["dir"] == "y":
+                # Y方向梁 → X位置で分割（梁のY範囲がセルと重なる場合のみ）
+                if (all_x_min + edge_tol < bcx < all_x_max - edge_tol and
+                        x1 + edge_tol < bcx < x2 - edge_tol):
+                    # 梁のY範囲がこのセルのY範囲と十分重なるか
+                    beam_y_lo = b["y_min"] - beam_margin
+                    beam_y_hi = b["y_max"] + beam_margin
+                    overlap = min(y2, beam_y_hi) - max(y1, beam_y_lo)
+                    cell_y_span = y2 - y1
+                    if overlap > cell_y_span * 0.5:
+                        # セルを梁位置で2分割
+                        new_cells.append((x1, bcx, y1, y2))
+                        new_cells.append((bcx, x2, y1, y2))
+                        split_done = True
             else:
-                joist_span = wy
+                # X方向梁 → Y位置で分割（梁のX範囲がセルと重なる場合のみ）
+                if (all_y_min + edge_tol < bcy < all_y_max - edge_tol and
+                        y1 + edge_tol < bcy < y2 - edge_tol):
+                    beam_x_lo = b["x_min"] - beam_margin
+                    beam_x_hi = b["x_max"] + beam_margin
+                    overlap = min(x2, beam_x_hi) - max(x1, beam_x_lo)
+                    cell_x_span = x2 - x1
+                    if overlap > cell_x_span * 0.5:
+                        new_cells.append((x1, x2, y1, bcy))
+                        new_cells.append((x1, x2, bcy, y2))
+                        split_done = True
+            if not split_done:
+                new_cells.append((x1, x2, y1, y2))
+        base_cells = new_cells
 
-            if joist_span > 4.0:
-                n_div = int(np.ceil(joist_span / 4.0))
-                div_span = joist_span / n_div
-                for d in range(n_div):
-                    if joist_dir == "x":
-                        compartments.append({
-                            "x_min": x1 + d * div_span,
-                            "x_max": x1 + (d + 1) * div_span,
-                            "y_min": y1, "y_max": y2,
-                            "width_x": div_span, "width_y": wy,
-                            "slab_top_z": slab_top_z,
-                            "joist_dir": joist_dir,
-                        })
-                    else:
-                        compartments.append({
-                            "x_min": x1, "x_max": x2,
-                            "y_min": y1 + d * div_span,
-                            "y_max": y1 + (d + 1) * div_span,
-                            "width_x": wx, "width_y": div_span,
-                            "slab_top_z": slab_top_z,
-                            "joist_dir": joist_dir,
-                        })
-            else:
-                compartments.append({
-                    "x_min": x1, "x_max": x2,
-                    "y_min": y1, "y_max": y2,
-                    "width_x": wx, "width_y": wy,
-                    "slab_top_z": slab_top_z,
-                    "joist_dir": joist_dir,
-                })
+    print(f"\n  梁分割後セル: {len(base_cells)}個")
+
+    # Step 4: セルから区画を生成（根太方向4m超なら分割）
+    compartments = []
+    for (x1, x2, y1, y2) in base_cells:
+        wx = x2 - x1
+        wy = y2 - y1
+        if wx < 0.1 or wy < 0.1:
+            continue
+
+        # 根太方向のスパンが4m超なら分割
+        if joist_dir == "x":
+            joist_span = wx
+        else:
+            joist_span = wy
+
+        if joist_span > 4.0:
+            n_div = int(np.ceil(joist_span / 4.0))
+            div_span = joist_span / n_div
+            for d in range(n_div):
+                if joist_dir == "x":
+                    compartments.append({
+                        "x_min": x1 + d * div_span,
+                        "x_max": x1 + (d + 1) * div_span,
+                        "y_min": y1, "y_max": y2,
+                        "width_x": div_span, "width_y": wy,
+                        "slab_top_z": slab_top_z,
+                        "joist_dir": joist_dir,
+                    })
+                else:
+                    compartments.append({
+                        "x_min": x1, "x_max": x2,
+                        "y_min": y1 + d * div_span,
+                        "y_max": y1 + (d + 1) * div_span,
+                        "width_x": wx, "width_y": div_span,
+                        "slab_top_z": slab_top_z,
+                        "joist_dir": joist_dir,
+                    })
+        else:
+            compartments.append({
+                "x_min": x1, "x_max": x2,
+                "y_min": y1, "y_max": y2,
+                "width_x": wx, "width_y": wy,
+                "slab_top_z": slab_top_z,
+                "joist_dir": joist_dir,
+            })
 
     print(f"\n  2F区画: {len(compartments)}個 (根太方向: {joist_dir})")
     for idx, c in enumerate(compartments):
