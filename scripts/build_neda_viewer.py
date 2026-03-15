@@ -1533,13 +1533,15 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 #neda-info {{ position:fixed; bottom:10px; left:10px; color:#fff; background:rgba(0,0,0,0.85);
   padding:14px 18px; border-radius:8px; font-size:13px; z-index:100; line-height:1.6; max-width:450px;
   max-height:50vh; overflow-y:auto; }}
-#controls {{ position:fixed; bottom:10px; right:10px; z-index:100; display:flex; flex-wrap:wrap; gap:4px; align-items:center; }}
+#controls {{ position:fixed; bottom:10px; right:10px; z-index:100; display:flex; flex-direction:column; gap:4px; align-items:flex-end; }}
 #controls button {{ background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3);
-  padding:8px 14px; border-radius:6px; cursor:pointer; font-size:12px; }}
+  padding:6px 12px; border-radius:6px; cursor:pointer; font-size:11px; }}
 #controls button:hover {{ background:rgba(255,255,255,0.3); }}
 #controls button.active {{ background:rgba(79,195,247,0.5); border-color:#4fc3f7; }}
-#pitch-group {{ display:flex; gap:2px; margin-right:8px; }}
-#pitch-group button {{ padding:8px 12px; }}
+.pitch-row {{ display:flex; align-items:center; gap:4px; }}
+.pitch-label {{ color:#aaa; font-size:11px; min-width:55px; text-align:right; }}
+.pitch-btns {{ display:flex; gap:2px; }}
+.pitch-btns button {{ padding:5px 10px; font-size:11px; }}
 .comp-label {{
   color:#fff; font-size:12px; font-weight:bold; padding:3px 8px;
   border-radius:4px; white-space:nowrap; pointer-events:none;
@@ -1557,13 +1559,18 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 <div id="neda-info"></div>
 <div id="legend"></div>
 <div id="controls">
-  <div id="pitch-group"></div>
-  <button id="btn-neda" class="active" onclick="toggleNeda()">1F根太</button>
-  <button id="btn-tb" class="active" onclick="toggleTB()">テラス・バルコニー根太</button>
-  <button id="btn-f2" class="active" onclick="toggleF2()">2F根太</button>
-  <button id="btn-comp" class="active" onclick="toggleComp()">区画表示</button>
-  <button id="btn-building" class="active" onclick="toggleBuilding()">建物表示</button>
-  <button onclick="resetCam()">リセット</button>
+  <div class="pitch-row"><span class="pitch-label">1F:</span><div id="pitch-1f" class="pitch-btns"></div></div>
+  <div class="pitch-row"><span class="pitch-label">2F:</span><div id="pitch-2f" class="pitch-btns"></div></div>
+  <div class="pitch-row"><span class="pitch-label">テラス:</span><div id="pitch-terrace" class="pitch-btns"></div></div>
+  <div class="pitch-row"><span class="pitch-label">バルコニー:</span><div id="pitch-balcony" class="pitch-btns"></div></div>
+  <div style="display:flex;gap:4px;flex-wrap:wrap;">
+    <button id="btn-neda" class="active" onclick="toggleNeda()">1F根太</button>
+    <button id="btn-tb" class="active" onclick="toggleTB()">テラス・バルコニー根太</button>
+    <button id="btn-f2" class="active" onclick="toggleF2()">2F根太</button>
+    <button id="btn-comp" class="active" onclick="toggleComp()">区画表示</button>
+    <button id="btn-building" class="active" onclick="toggleBuilding()">建物表示</button>
+    <button onclick="resetCam()">リセット</button>
+  </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -1586,12 +1593,8 @@ const DEFAULT_PITCH={default_pitch};
 const COLORS={colors_json};
 const COMPARTMENTS={compartments_json};
 
-let currentPitch=DEFAULT_PITCH;
-
-const REASON_COLORS = {{
-  "基本ピッチ": 0x4fc3f7,
-  "区画端部": 0x00e676,
-}};
+// 各カテゴリのピッチ状態
+let pitch1F=DEFAULT_PITCH, pitch2F=DEFAULT_PITCH, pitchTerrace=DEFAULT_PITCH, pitchBalcony=DEFAULT_PITCH;
 
 // 区画ごとの色
 const COMP_COLORS = [0xff6b6b, 0x51cf66, 0x339af0, 0xfcc419, 0xcc5de8,
@@ -1748,135 +1751,143 @@ scene.add(tbNedaGroup);
 const f2NedaGroup=new THREE.Group();
 scene.add(f2NedaGroup);
 
-function buildNedaLines(pitchMm){{
-  while(nedaGroup.children.length>0) nedaGroup.remove(nedaGroup.children[0]);
-  const pd=PITCH_DATA[pitchMm];
-  if(!pd) return;
-  pd.joists.forEach(j=>{{
-    const compColor=COMP_COLORS[j.comp_idx%COMP_COLORS.length];
-    const color=j.reason==="区画端部"?0x00e676:compColor;
+function drawLines(group, joists, colorFn){{
+  while(group.children.length>0) group.remove(group.children[0]);
+  joists.forEach(j=>{{
+    const color=colorFn(j);
     const s=j.seg;
     const g=new THREE.LineGeometry();
     g.setPositions([s[0][0],s[0][1],s[0][2],s[1][0],s[1][1],s[1][2]]);
     const mat=new THREE.LineMaterial({{color,linewidth:4,resolution:new THREE.Vector2(innerWidth,innerHeight)}});
-    const line=new THREE.Line2(g,mat);
-    line.userData={{reason:j.reason,length:j.length_m,comp_idx:j.comp_idx}};
-    nedaGroup.add(line);
+    group.add(new THREE.Line2(g,mat));
   }});
-  // 集計表示更新
-  const S=pd.summary;
-  let h='<b style="font-size:14px;">根太積算</b><br><br>';
-  h+=`ピッチ: ${{S.pitch}}mm<br>`;
-  h+=`<b>総本数: ${{S.total_count}}本</b><br>`;
-  h+=`総長さ: ${{S.total_length}}m<br><br>`;
-  h+='<b>理由別:</b><br>';
-  for(const [reason, count] of Object.entries(S.count_by_reason)){{
-    const color=REASON_COLORS[reason]||0x4fc3f7;
-    const hex='#'+color.toString(16).padStart(6,'0');
-    const len=S.length_by_reason[reason]||0;
-    h+=`<span style="color:${{hex}}">━━</span> ${{reason}}: ${{count}}本 / ${{len}}m<br>`;
-  }}
-  h+='<br><b>区画別:</b><br>';
-  for(let i=0;i<S.compartment_count;i++){{
-    const cnt=S.count_by_comp[String(i)]||0;
-    const len=S.length_by_comp[String(i)]||0;
-    const color=COMP_COLORS[i%COMP_COLORS.length];
-    const hex='#'+color.toString(16).padStart(6,'0');
-    const c=COMPARTMENTS[i];
-    h+=`<span style="color:${{hex}}">■</span> 区画${{i+1}} (${{c.width_x.toFixed(2)}}x${{c.width_y.toFixed(2)}}m): ${{cnt}}本 / ${{len}}m<br>`;
-  }}
-  // テラス・バルコニー根太の集計
-  const tbPd=TB_PITCH_DATA[pitchMm];
-  if(tbPd && tbPd.summary.total_count>0){{
-    h+='<br><b style="font-size:14px;">テラス・バルコニー根太</b><br><br>';
-    h+=`ピッチ: ${{tbPd.summary.pitch}}mm<br>`;
-    h+=`<b>総本数: ${{tbPd.summary.total_count}}本</b><br>`;
-    h+=`総長さ: ${{tbPd.summary.total_length}}m<br><br>`;
-    for(let i=0;i<tbPd.summary.compartment_count;i++){{
-      const cnt=tbPd.summary.count_by_comp[String(i)]||0;
-      const len=tbPd.summary.length_by_comp[String(i)]||0;
-      const c=TB_COMPARTMENTS[i];
+}}
+
+function compLine(comps, compColors, idx, label, pitchMm, pd){{
+  const cnt=pd.summary.count_by_comp[String(idx)]||0;
+  const len=pd.summary.length_by_comp[String(idx)]||0;
+  if(cnt===0) return '';
+  const c=comps[idx];
+  const w=c.width_x, d=c.width_y, area=(w*d).toFixed(2);
+  const jLen=cnt>0?(len/cnt).toFixed(2):'0';
+  const color=compColors[idx%compColors.length];
+  const hex='#'+(typeof color==='number'?color:color).toString(16).padStart(6,'0');
+  return `<span style="color:${{hex}}">■</span> ${{label}} (${{w.toFixed(2)}}×${{d.toFixed(2)}}m=${{area}}m²): ${{jLen}}m×${{cnt}}本 = ${{len}}m<br>`;
+}}
+
+function buildNedaLines(){{
+  const pd=PITCH_DATA[pitch1F]; if(!pd) return;
+  drawLines(nedaGroup, pd.joists, j=>COMP_COLORS[j.comp_idx%COMP_COLORS.length]);
+}}
+
+function buildTBNedaLines(){{
+  // テラスとバルコニーは別ピッチ → 両方のデータをマージ描画
+  while(tbNedaGroup.children.length>0) tbNedaGroup.remove(tbNedaGroup.children[0]);
+  [pitchTerrace, pitchBalcony].forEach(pm=>{{
+    const pd=TB_PITCH_DATA[pm]; if(!pd) return;
+    pd.joists.forEach(j=>{{
+      const c=TB_COMPARTMENTS[j.comp_idx];
+      if((c.category==='テラス' && pm!==pitchTerrace)||(c.category==='バルコニー' && pm!==pitchBalcony)) return;
       const color=TB_COLORS[c.category]||0x888888;
-      const hex='#'+color.toString(16).padStart(6,'0');
-      h+=`<span style="color:${{hex}}">■</span> ${{c.category}} (${{c.width_x.toFixed(2)}}x${{c.width_y.toFixed(2)}}m): ${{cnt}}本 / ${{len}}m<br>`;
+      const s=j.seg;
+      const g=new THREE.LineGeometry();
+      g.setPositions([s[0][0],s[0][1],s[0][2],s[1][0],s[1][1],s[1][2]]);
+      const mat=new THREE.LineMaterial({{color,linewidth:4,resolution:new THREE.Vector2(innerWidth,innerHeight)}});
+      tbNedaGroup.add(new THREE.Line2(g,mat));
+    }});
+  }});
+}}
+
+function buildF2NedaLines(){{
+  const pd=F2_PITCH_DATA[pitch2F]; if(!pd) return;
+  drawLines(f2NedaGroup, pd.joists, j=>F2_COMP_COLORS[j.comp_idx%F2_COMP_COLORS.length]);
+}}
+
+function updateInfo(){{
+  let h='';
+  // 1F根太
+  const pd=PITCH_DATA[pitch1F];
+  if(pd && pd.summary.total_count>0){{
+    h+='<b style="font-size:14px;">1F根太</b> ('+pitch1F+'mm)<br>';
+    for(let i=0;i<pd.summary.compartment_count;i++)
+      h+=compLine(COMPARTMENTS,COMP_COLORS,i,'1F区画'+(i+1),pitch1F,pd);
+    h+=`<b>合計: ${{pd.summary.total_count}}本 / ${{pd.summary.total_length}}m</b><br><br>`;
+  }}
+  // 2F根太
+  const f2Pd=F2_PITCH_DATA[pitch2F];
+  if(f2Pd && f2Pd.summary.total_count>0){{
+    h+='<b style="font-size:14px;">2F根太</b> ('+pitch2F+'mm)<br>';
+    for(let i=0;i<f2Pd.summary.compartment_count;i++)
+      h+=compLine(F2_COMPARTMENTS,F2_COMP_COLORS,i,'2F区画'+(i+1),pitch2F,f2Pd);
+    h+=`<b>合計: ${{f2Pd.summary.total_count}}本 / ${{f2Pd.summary.total_length}}m</b><br><br>`;
+  }}
+  // テラス根太
+  const tPd=TB_PITCH_DATA[pitchTerrace];
+  if(tPd){{
+    let tCnt=0, tLen=0;
+    let tLines='';
+    for(let i=0;i<tPd.summary.compartment_count;i++){{
+      const c=TB_COMPARTMENTS[i]; if(c.category!=='テラス') continue;
+      const cnt=tPd.summary.count_by_comp[String(i)]||0;
+      const len=tPd.summary.length_by_comp[String(i)]||0;
+      tCnt+=cnt; tLen+=len;
+      if(cnt>0){{
+        const w=c.width_x,d=c.width_y,area=(w*d).toFixed(2);
+        const jLen=(len/cnt).toFixed(2);
+        tLines+=`<span style="color:#66bb6a">■</span> テラス (${{w.toFixed(2)}}×${{d.toFixed(2)}}m=${{area}}m²): ${{jLen}}m×${{cnt}}本 = ${{len.toFixed(2)}}m<br>`;
+      }}
+    }}
+    if(tCnt>0){{
+      h+='<b style="font-size:14px;">テラス根太</b> ('+pitchTerrace+'mm)<br>';
+      h+=tLines;
+      h+=`<b>合計: ${{tCnt}}本 / ${{tLen.toFixed(2)}}m</b><br><br>`;
     }}
   }}
-  // 2F根太の集計
-  const f2Pd=F2_PITCH_DATA[pitchMm];
-  if(f2Pd && f2Pd.summary.total_count>0){{
-    h+='<br><b style="font-size:14px;">2F根太</b><br><br>';
-    h+=`ピッチ: ${{f2Pd.summary.pitch}}mm<br>`;
-    h+=`<b>総本数: ${{f2Pd.summary.total_count}}本</b><br>`;
-    h+=`総長さ: ${{f2Pd.summary.total_length}}m<br><br>`;
-    for(let i=0;i<f2Pd.summary.compartment_count;i++){{
-      const cnt=f2Pd.summary.count_by_comp[String(i)]||0;
-      const len=f2Pd.summary.length_by_comp[String(i)]||0;
-      const c=F2_COMPARTMENTS[i];
-      const ccolor=F2_COMP_COLORS[i%F2_COMP_COLORS.length];
-      const hex='#'+ccolor.toString(16).padStart(6,'0');
-      h+=`<span style="color:${{hex}}">■</span> 2F区画${{i+1}} (${{c.width_x.toFixed(2)}}x${{c.width_y.toFixed(2)}}m): ${{cnt}}本 / ${{len}}m<br>`;
+  // バルコニー根太
+  const bPd=TB_PITCH_DATA[pitchBalcony];
+  if(bPd){{
+    let bCnt=0, bLen=0;
+    let bLines='';
+    for(let i=0;i<bPd.summary.compartment_count;i++){{
+      const c=TB_COMPARTMENTS[i]; if(c.category!=='バルコニー') continue;
+      const cnt=bPd.summary.count_by_comp[String(i)]||0;
+      const len=bPd.summary.length_by_comp[String(i)]||0;
+      bCnt+=cnt; bLen+=len;
+      if(cnt>0){{
+        const w=c.width_x,d=c.width_y,area=(w*d).toFixed(2);
+        const jLen=(len/cnt).toFixed(2);
+        bLines+=`<span style="color:#42a5f5">■</span> バルコニー (${{w.toFixed(2)}}×${{d.toFixed(2)}}m=${{area}}m²): ${{jLen}}m×${{cnt}}本 = ${{len.toFixed(2)}}m<br>`;
+      }}
+    }}
+    if(bCnt>0){{
+      h+='<b style="font-size:14px;">バルコニー根太</b> ('+pitchBalcony+'mm)<br>';
+      h+=bLines;
+      h+=`<b>合計: ${{bCnt}}本 / ${{bLen.toFixed(2)}}m</b><br><br>`;
     }}
   }}
   document.getElementById('neda-info').innerHTML=h;
 }}
 
-function buildTBNedaLines(pitchMm){{
-  while(tbNedaGroup.children.length>0) tbNedaGroup.remove(tbNedaGroup.children[0]);
-  const pd=TB_PITCH_DATA[pitchMm];
-  if(!pd) return;
-  pd.joists.forEach(j=>{{
-    const c=TB_COMPARTMENTS[j.comp_idx];
-    const color=TB_COLORS[c.category]||0x888888;
-    const s=j.seg;
-    const g=new THREE.LineGeometry();
-    g.setPositions([s[0][0],s[0][1],s[0][2],s[1][0],s[1][1],s[1][2]]);
-    const mat=new THREE.LineMaterial({{color,linewidth:4,resolution:new THREE.Vector2(innerWidth,innerHeight)}});
-    const line=new THREE.Line2(g,mat);
-    line.userData={{reason:j.reason,length:j.length_m,comp_idx:j.comp_idx}};
-    tbNedaGroup.add(line);
+function rebuildAll(){{ buildNedaLines(); buildTBNedaLines(); buildF2NedaLines(); updateInfo(); }}
+
+function makePitchBtns(containerId, getter, setter){{
+  const el=document.getElementById(containerId);
+  PITCHES.forEach(p=>{{
+    const b=document.createElement('button');
+    b.textContent=p+'mm';
+    b.dataset.pitch=p;
+    b.onclick=()=>{{ setter(p); el.querySelectorAll('button').forEach(x=>x.classList.toggle('active',parseInt(x.dataset.pitch)===p)); rebuildAll(); }};
+    if(p===getter()) b.classList.add('active');
+    el.appendChild(b);
   }});
 }}
 
-function buildF2NedaLines(pitchMm){{
-  while(f2NedaGroup.children.length>0) f2NedaGroup.remove(f2NedaGroup.children[0]);
-  const pd=F2_PITCH_DATA[pitchMm];
-  if(!pd) return;
-  pd.joists.forEach(j=>{{
-    const compColor=F2_COMP_COLORS[j.comp_idx%F2_COMP_COLORS.length];
-    const color=j.reason==="区画端部"?0xea80fc:compColor;
-    const s=j.seg;
-    const g=new THREE.LineGeometry();
-    g.setPositions([s[0][0],s[0][1],s[0][2],s[1][0],s[1][1],s[1][2]]);
-    const mat=new THREE.LineMaterial({{color,linewidth:4,resolution:new THREE.Vector2(innerWidth,innerHeight)}});
-    const line=new THREE.Line2(g,mat);
-    line.userData={{reason:j.reason,length:j.length_m,comp_idx:j.comp_idx}};
-    f2NedaGroup.add(line);
-  }});
-}}
+makePitchBtns('pitch-1f', ()=>pitch1F, v=>{{pitch1F=v;}});
+makePitchBtns('pitch-2f', ()=>pitch2F, v=>{{pitch2F=v;}});
+makePitchBtns('pitch-terrace', ()=>pitchTerrace, v=>{{pitchTerrace=v;}});
+makePitchBtns('pitch-balcony', ()=>pitchBalcony, v=>{{pitchBalcony=v;}});
 
-function switchPitch(pitchMm){{
-  currentPitch=pitchMm;
-  buildNedaLines(pitchMm);
-  buildTBNedaLines(pitchMm);
-  buildF2NedaLines(pitchMm);
-  document.querySelectorAll('#pitch-group button').forEach(b=>{{
-    b.classList.toggle('active', parseInt(b.dataset.pitch)===pitchMm);
-  }});
-}}
-
-const pg=document.getElementById('pitch-group');
-PITCHES.forEach(p=>{{
-  const b=document.createElement('button');
-  b.textContent=p+'mm';
-  b.dataset.pitch=p;
-  b.onclick=()=>switchPitch(p);
-  if(p===DEFAULT_PITCH) b.classList.add('active');
-  pg.appendChild(b);
-}});
-
-buildNedaLines(DEFAULT_PITCH);
-buildTBNedaLines(DEFAULT_PITCH);
-buildF2NedaLines(DEFAULT_PITCH);
+rebuildAll();
 
 const center=new THREE.Vector3();bbox.getCenter(center);
 const size=bbox.getSize(new THREE.Vector3());const maxDim=Math.max(size.x,size.y,size.z);
