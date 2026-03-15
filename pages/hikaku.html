@@ -823,10 +823,10 @@ async function fetchFromServer(){
     const manifest = await res.json();
     const models = manifest.models || {};
 
-    // ensure "サーバー" folder
-    let serverFolder = store.folders.find(f=>f.name==='サーバー（自動取得）');
+    // オリジナルフォルダに格納
+    let serverFolder = store.folders.find(f=>f.type==='original');
     if(!serverFolder){
-      serverFolder = {id:genId(), name:'サーバー（自動取得）', type:'original', parentId:null};
+      serverFolder = {id:genId(), name:'オリジナル', type:'original', parentId:null};
       store.folders.push(serverFolder);
     }
 
@@ -880,4 +880,3 @@ if(location.protocol.startsWith('http')){
 </script>
 </body>
 </html>
-
