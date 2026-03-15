@@ -636,7 +636,59 @@ def detect_2f_compartments(ifc, settings):
                 new_cells.append((x1, x2, y1, y2))
         base_cells = new_cells
 
-    print(f"\n  梁分割後セル: {len(base_cells)}個")
+    print(f"\n  梁分割後セル（統合前）: {len(base_cells)}個")
+
+    # Step 3b: 梁分割で生じた狭いセルを隣接セルに統合
+    # 根太方向の幅が min_cell_span 未満のセルは隣に吸収
+    min_cell_span = 0.8  # 最小セル幅（m）
+    merged = True
+    while merged:
+        merged = False
+        new_cells = []
+        skip = set()
+        for i, (x1, x2, y1, y2) in enumerate(base_cells):
+            if i in skip:
+                continue
+            wx = x2 - x1
+            wy = y2 - y1
+            narrow = (joist_dir == "x" and wx < min_cell_span) or \
+                     (joist_dir == "y" and wy < min_cell_span)
+            if not narrow:
+                new_cells.append((x1, x2, y1, y2))
+                continue
+            # 隣接セルを探して統合
+            best_j = -1
+            best_area = 0
+            for j, (ax1, ax2, ay1, ay2) in enumerate(base_cells):
+                if j == i or j in skip:
+                    continue
+                # Y範囲が一致し、X方向で隣接（またはその逆）
+                if abs(y1 - ay1) < 0.01 and abs(y2 - ay2) < 0.01:
+                    if abs(x2 - ax1) < 0.01 or abs(ax2 - x1) < 0.01:
+                        area = (ax2 - ax1) * (ay2 - ay1)
+                        if area > best_area:
+                            best_area = area
+                            best_j = j
+                if abs(x1 - ax1) < 0.01 and abs(x2 - ax2) < 0.01:
+                    if abs(y2 - ay1) < 0.01 or abs(ay2 - y1) < 0.01:
+                        area = (ax2 - ax1) * (ay2 - ay1)
+                        if area > best_area:
+                            best_area = area
+                            best_j = j
+            if best_j >= 0:
+                ax1, ax2, ay1, ay2 = base_cells[best_j]
+                mx1 = min(x1, ax1)
+                mx2 = max(x2, ax2)
+                my1 = min(y1, ay1)
+                my2 = max(y2, ay2)
+                new_cells.append((mx1, mx2, my1, my2))
+                skip.add(best_j)
+                merged = True
+            else:
+                new_cells.append((x1, x2, y1, y2))
+        base_cells = new_cells
+
+    print(f"  梁分割後セル（統合後）: {len(base_cells)}個")
 
     # Step 4: セルから区画を生成（根太方向4m超なら分割）
     compartments = []
