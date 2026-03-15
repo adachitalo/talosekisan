@@ -522,132 +522,132 @@ def detect_2f_compartments(ifc, settings):
         joist_dir = "x" if x_span <= y_span else "y"
         print(f"\n  集成梁なし → 短手方向で根太配置: {joist_dir}")
 
-    # 区画生成（集成梁で分割）
-    # 集成梁が根太方向に直交 → 梁のピッチ方向の位置で区画を分割
-    compartments = []
+    # =====================================================================
+    # ログ壁検出 → 区画境界として使用（間仕切壁は無視）
+    # =====================================================================
+    walls = ifc.by_type("IfcWall") + ifc.by_type("IfcWallStandardCase")
+    wall_x_boundaries = set()  # Y方向ログ壁 → X方向の境界
+    wall_y_boundaries = set()  # X方向ログ壁 → Y方向の境界
+    wall_seen = set()
+    edge_tol = 0.15  # スラブ端との近接判定
 
-    if beam_2f:
-        # 梁のピッチ方向（= 梁の長手方向に直交 = 根太方向と同じ軸）の位置を収集
-        # 根太がjoist_dir方向に走り、それに直交する方向にピッチで並ぶ
-        # 梁は根太方向に直交（= pitch方向）に走っている
-        # → 梁のpitch方向の位置（梁の中心線）で区画を分割
-        if joist_dir == "x":
-            # 根太はX方向、梁はY方向に走っている
-            # 梁のX位置で区画を分割
-            beam_positions = sorted(set(
-                round((b["x_min"] + b["x_max"]) / 2, 3) for b in beam_2f if b["dir"] == "y"
-            ))
-            # 区画の境界: スラブ端 + 梁位置
-            boundaries = sorted(set([all_x_min] + beam_positions + [all_x_max]))
-            for i in range(len(boundaries) - 1):
-                x1, x2 = boundaries[i], boundaries[i+1]
-                span = x2 - x1
-                if span < 0.1:
-                    continue
-                # 4m超のスパンは分割
-                if span > 4.0:
-                    n_div = int(np.ceil(span / 4.0))
-                    div_span = span / n_div
-                    for d in range(n_div):
+    for w in walls:
+        wname = (w.Name or "").lower()
+        if not wname.startswith("log"):
+            continue
+        try:
+            shape = ifcopenshell.geom.create_shape(settings, w)
+            vf = shape.geometry.verts
+            wxs = [vf[i] for i in range(0, len(vf), 3)]
+            wys = [vf[i+1] for i in range(0, len(vf), 3)]
+            wzs = [vf[i+2] for i in range(0, len(vf), 3)]
+
+            # 2Fスラブ高さに到達する壁のみ
+            if max(wzs) < all_z_min - 0.2:
+                continue
+
+            xspan = max(wxs) - min(wxs)
+            yspan = max(wys) - min(wys)
+            wdir = "x" if xspan > yspan else "y"
+            cx = round((min(wxs) + max(wxs)) / 2, 2)
+            cy = round((min(wys) + max(wys)) / 2, 2)
+            key = (wdir, cx, cy)
+            if key in wall_seen:
+                continue
+            wall_seen.add(key)
+
+            if wdir == "y":
+                # Y方向壁 → X境界（スラブY範囲を横断していること）
+                if max(wys) > all_y_min + 0.1 and min(wys) < all_y_max - 0.1:
+                    if all_x_min - 0.2 <= cx <= all_x_max + 0.2:
+                        # スラブ端でない内部壁のみ
+                        if cx > all_x_min + edge_tol and cx < all_x_max - edge_tol:
+                            wall_x_boundaries.add(cx)
+            else:
+                # X方向壁 → Y境界（スラブX範囲を横断していること）
+                if max(wxs) > all_x_min + 0.1 and min(wxs) < all_x_max - 0.1:
+                    if all_y_min - 0.2 <= cy <= all_y_max + 0.2:
+                        if cy > all_y_min + edge_tol and cy < all_y_max - edge_tol:
+                            wall_y_boundaries.add(cy)
+        except Exception:
+            pass
+
+    print(f"\n  ログ壁による内部境界:")
+    print(f"    X方向境界（Y方向ログ壁）: {sorted(wall_x_boundaries)}")
+    print(f"    Y方向境界（X方向ログ壁）: {sorted(wall_y_boundaries)}")
+
+    # =====================================================================
+    # 区画グリッド生成（ログ壁 + 集成梁）
+    # =====================================================================
+    # X方向境界: スラブ端 + ログ壁(Y方向) + 梁(Y方向)のX中心
+    # Y方向境界: スラブ端 + ログ壁(X方向)
+    beam_x_positions = set()
+    beam_y_positions = set()
+    for b in beam_2f:
+        bcx = round((b["x_min"] + b["x_max"]) / 2, 3)
+        bcy = round((b["y_min"] + b["y_max"]) / 2, 3)
+        if b["dir"] == "y":
+            # Y方向梁 → X境界（スラブ内のもののみ）
+            if all_x_min + edge_tol < bcx < all_x_max - edge_tol:
+                beam_x_positions.add(bcx)
+        else:
+            # X方向梁 → Y境界
+            if all_y_min + edge_tol < bcy < all_y_max - edge_tol:
+                beam_y_positions.add(bcy)
+
+    x_bounds = sorted(set([all_x_min] + list(wall_x_boundaries) +
+                          list(beam_x_positions) + [all_x_max]))
+    y_bounds = sorted(set([all_y_min] + list(wall_y_boundaries) +
+                          list(beam_y_positions) + [all_y_max]))
+
+    print(f"\n  区画グリッド:")
+    print(f"    X境界: {[round(x,3) for x in x_bounds]}")
+    print(f"    Y境界: {[round(y,3) for y in y_bounds]}")
+
+    # グリッドセルから区画を生成（根太方向のスパンが4m超の場合は分割）
+    compartments = []
+    for xi in range(len(x_bounds) - 1):
+        for yi in range(len(y_bounds) - 1):
+            x1, x2 = x_bounds[xi], x_bounds[xi + 1]
+            y1, y2 = y_bounds[yi], y_bounds[yi + 1]
+            wx = x2 - x1
+            wy = y2 - y1
+            if wx < 0.1 or wy < 0.1:
+                continue
+
+            # 根太方向のスパンが4m超なら分割
+            if joist_dir == "x":
+                joist_span = wx
+            else:
+                joist_span = wy
+
+            if joist_span > 4.0:
+                n_div = int(np.ceil(joist_span / 4.0))
+                div_span = joist_span / n_div
+                for d in range(n_div):
+                    if joist_dir == "x":
                         compartments.append({
                             "x_min": x1 + d * div_span,
                             "x_max": x1 + (d + 1) * div_span,
-                            "y_min": all_y_min, "y_max": all_y_max,
-                            "width_x": div_span,
-                            "width_y": all_y_max - all_y_min,
+                            "y_min": y1, "y_max": y2,
+                            "width_x": div_span, "width_y": wy,
                             "slab_top_z": slab_top_z,
                             "joist_dir": joist_dir,
                         })
-                else:
-                    compartments.append({
-                        "x_min": x1, "x_max": x2,
-                        "y_min": all_y_min, "y_max": all_y_max,
-                        "width_x": span,
-                        "width_y": all_y_max - all_y_min,
-                        "slab_top_z": slab_top_z,
-                        "joist_dir": joist_dir,
-                    })
-        else:
-            # 根太はY方向、梁はX方向に走っている
-            # 梁のY位置で区画を分割
-            beam_positions = sorted(set(
-                round((b["y_min"] + b["y_max"]) / 2, 3) for b in beam_2f if b["dir"] == "x"
-            ))
-            boundaries = sorted(set([all_y_min] + beam_positions + [all_y_max]))
-            for i in range(len(boundaries) - 1):
-                y1, y2 = boundaries[i], boundaries[i+1]
-                span = y2 - y1
-                if span < 0.1:
-                    continue
-                if span > 4.0:
-                    n_div = int(np.ceil(span / 4.0))
-                    div_span = span / n_div
-                    for d in range(n_div):
+                    else:
                         compartments.append({
-                            "x_min": all_x_min, "x_max": all_x_max,
+                            "x_min": x1, "x_max": x2,
                             "y_min": y1 + d * div_span,
                             "y_max": y1 + (d + 1) * div_span,
-                            "width_x": all_x_max - all_x_min,
-                            "width_y": div_span,
+                            "width_x": wx, "width_y": div_span,
                             "slab_top_z": slab_top_z,
                             "joist_dir": joist_dir,
                         })
-                else:
-                    compartments.append({
-                        "x_min": all_x_min, "x_max": all_x_max,
-                        "y_min": y1, "y_max": y2,
-                        "width_x": all_x_max - all_x_min,
-                        "width_y": span,
-                        "slab_top_z": slab_top_z,
-                        "joist_dir": joist_dir,
-                    })
-    else:
-        # 集成梁なし → スラブ全体を1区画として、4m超なら分割
-        x_span = all_x_max - all_x_min
-        y_span = all_y_max - all_y_min
-
-        if joist_dir == "x":
-            # 根太X方向、ピッチ方向=Y → X方向のスパンが4m超なら分割
-            pitch_span = x_span
-            if pitch_span > 4.0:
-                n_div = int(np.ceil(pitch_span / 4.0))
-                div_span = pitch_span / n_div
-                for d in range(n_div):
-                    compartments.append({
-                        "x_min": all_x_min + d * div_span,
-                        "x_max": all_x_min + (d + 1) * div_span,
-                        "y_min": all_y_min, "y_max": all_y_max,
-                        "width_x": div_span, "width_y": y_span,
-                        "slab_top_z": slab_top_z,
-                        "joist_dir": joist_dir,
-                    })
             else:
                 compartments.append({
-                    "x_min": all_x_min, "x_max": all_x_max,
-                    "y_min": all_y_min, "y_max": all_y_max,
-                    "width_x": x_span, "width_y": y_span,
-                    "slab_top_z": slab_top_z,
-                    "joist_dir": joist_dir,
-                })
-        else:
-            pitch_span = y_span
-            if pitch_span > 4.0:
-                n_div = int(np.ceil(pitch_span / 4.0))
-                div_span = pitch_span / n_div
-                for d in range(n_div):
-                    compartments.append({
-                        "x_min": all_x_min, "x_max": all_x_max,
-                        "y_min": all_y_min + d * div_span,
-                        "y_max": all_y_min + (d + 1) * div_span,
-                        "width_x": x_span, "width_y": div_span,
-                        "slab_top_z": slab_top_z,
-                        "joist_dir": joist_dir,
-                    })
-            else:
-                compartments.append({
-                    "x_min": all_x_min, "x_max": all_x_max,
-                    "y_min": all_y_min, "y_max": all_y_max,
-                    "width_x": x_span, "width_y": y_span,
+                    "x_min": x1, "x_max": x2,
+                    "y_min": y1, "y_max": y2,
+                    "width_x": wx, "width_y": wy,
                     "slab_top_z": slab_top_z,
                     "joist_dir": joist_dir,
                 })
