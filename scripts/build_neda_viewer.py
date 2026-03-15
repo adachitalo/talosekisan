@@ -580,8 +580,16 @@ def detect_2f_compartments(ifc, settings):
     # 区画グリッド生成（ログ壁ベース → 梁はセル交差時のみ分割）
     # =====================================================================
     # Step 1: ログ壁のみでベースグリッドを作成
-    x_bounds = sorted(set([all_x_min] + list(wall_x_boundaries) + [all_x_max]))
-    y_bounds = sorted(set([all_y_min] + list(wall_y_boundaries) + [all_y_max]))
+    # 根太方向に直交する壁のみ区画境界として使用
+    # （平行な壁は根太スパンに影響しないため無視）
+    if joist_dir == "x":
+        # 根太がX方向 → X境界（Y方向壁）のみ使用、Y境界（X方向壁）は無視
+        x_bounds = sorted(set([all_x_min] + list(wall_x_boundaries) + [all_x_max]))
+        y_bounds = [all_y_min, all_y_max]
+    else:
+        # 根太がY方向 → Y境界（X方向壁）のみ使用、X境界（Y方向壁）は無視
+        x_bounds = [all_x_min, all_x_max]
+        y_bounds = sorted(set([all_y_min] + list(wall_y_boundaries) + [all_y_max]))
 
     print(f"\n  ログ壁ベースグリッド:")
     print(f"    X境界: {[round(x,3) for x in x_bounds]}")
