@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TALO 新旧図面比較ツール</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+--blue:#58a6ff;--green:#3fb950;--red:#f85149;--yellow:#d29922;--hover:#1f6feb}
+body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Segoe UI",sans-serif;
+background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column}
+h1{font-size:20px;color:var(--blue);padding:16px 24px 4px}
+.sub{color:var(--dim);font-size:13px;padding:0 24px 12px}
+.main{display:flex;flex:1;gap:0;overflow:hidden}
+/* ===== 左パネル: フォルダツリー ===== */
+.left{width:340px;min-width:280px;border-right:1px solid var(--border);
+display:flex;flex-direction:column;overflow:hidden}
+.left-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;
+align-items:center;justify-content:space-between}
+.left-header h2{font-size:14px;color:var(--dim)}
+.left-actions{display:flex;gap:6px}
+.btn{padding:4px 12px;border-radius:6px;border:1px solid var(--border);
+background:var(--card);color:var(--text);cursor:pointer;font-size:12px;white-space:nowrap}
+.btn:hover{border-color:var(--hover);color:var(--blue)}
+.btn.primary{background:var(--hover);border-color:var(--hover);color:#fff}
+.btn.primary:hover{background:#388bfd}
+.btn.danger{color:var(--red)}
+.btn.danger:hover{border-color:var(--red)}
+.tree-wrap{flex:1;overflow-y:auto;padding:8px}
+.tree-node{user-select:none}
+.tree-row{display:flex;align-items:center;padding:4px 8px;border-radius:4px;cursor:pointer;
+font-size:13px;gap:4px}
+.tree-row:hover{background:rgba(88,166,255,0.1)}
+.tree-row.selected{background:rgba(88,166,255,0.15);color:var(--blue)}
+.tree-row .icon{width:18px;text-align:center;flex-shrink:0;font-size:14px}
+.tree-row .arrow{width:16px;text-align:center;flex-shrink:0;color:var(--dim);font-size:10px;
+transition:transform 0.15s}
+.tree-row .arrow.open{transform:rotate(90deg)}
+.tree-row .arrow.empty{visibility:hidden}
+.tree-row .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tree-row .badge{font-size:11px;color:var(--dim);margin-left:4px}
+.tree-children{padding-left:16px}
+.tree-children.collapsed{display:none}
+.tree-row.draggable{cursor:grab}
+.tree-row.dragging{opacity:0.5}
+/* ===== 右パネル: 比較エリア ===== */
+.right{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.compare-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;gap:16px}
+.drop-zone{flex:1;border:2px dashed var(--border);border-radius:8px;padding:16px;
+min-height:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+transition:border-color 0.2s,background 0.2s}
+.drop-zone.over{border-color:var(--blue);background:rgba(88,166,255,0.05)}
+.drop-zone .label{font-size:12px;color:var(--dim);margin-bottom:4px}
+.drop-zone .model-name{font-size:15px;font-weight:600;color:var(--text)}
+.drop-zone .model-path{font-size:11px;color:var(--dim)}
+.drop-zone .placeholder{color:var(--dim);font-size:13px}
+.drop-zone.old{border-color:rgba(248,81,73,0.3)}
+.drop-zone.old.has-data{border-color:var(--red);border-style:solid}
+.drop-zone.new{border-color:rgba(63,185,80,0.3)}
+.drop-zone.new.has-data{border-color:var(--green);border-style:solid}
+.compare-body{flex:1;overflow-y:auto;padding:16px}
+/* ===== 比較テーブル ===== */
+.section-title{font-size:15px;font-weight:600;margin:20px 0 8px;color:var(--blue);
+border-bottom:1px solid var(--border);padding-bottom:6px}
+.section-title:first-child{margin-top:0}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px}
+th{background:var(--card);color:var(--dim);font-weight:600;text-align:left;
+padding:8px 12px;border:1px solid var(--border);white-space:nowrap}
+td{padding:6px 12px;border:1px solid var(--border)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.diff-pos{color:var(--green)}
+.diff-neg{color:var(--red)}
+.diff-zero{color:var(--dim)}
+.diff-cell{font-weight:600}
+tr.subtotal{background:var(--card)}
+tr.subtotal td{font-weight:600}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;
+height:100%;color:var(--dim);gap:8px}
+.empty-state .big{font-size:40px;opacity:0.3}
+.empty-state p{font-size:14px}
+/* ===== モーダル ===== */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:none;
+align-items:center;justify-content:center;z-index:100}
+.modal-bg.show{display:flex}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:12px;
+padding:24px;width:400px;max-width:90vw}
+.modal h3{margin-bottom:16px;font-size:16px}
+.modal label{display:block;font-size:13px;color:var(--dim);margin-bottom:4px}
+.modal input,.modal select{width:100%;padding:8px 12px;border:1px solid var(--border);
+border-radius:6px;background:var(--bg);color:var(--text);font-size:14px;margin-bottom:12px}
+.modal .btns{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
+/* ===== JSON読み込み ===== */
+.import-zone{border:2px dashed var(--border);border-radius:8px;padding:24px;
+text-align:center;cursor:pointer;transition:border-color 0.2s;margin:8px 16px}
+.import-zone:hover,.import-zone.over{border-color:var(--blue);background:rgba(88,166,255,0.05)}
+.import-zone p{font-size:13px;color:var(--dim)}
+.import-zone input{display:none}
+/* ===== 印刷 ===== */
+@media print{
+  .left,.compare-header,.left-header,.btn,.import-zone{display:none!important}
+  .main{display:block}
+  .right{display:block}
+  body{background:#fff;color:#000}
+  table{font-size:11px}
+  th{background:#eee;color:#333}
+  td{border-color:#ccc}
+  .diff-pos{color:#16a34a}
+  .diff-neg{color:#dc2626}
+}
+</style>
+</head>
+<body>
+<h1>TALO 新旧図面比較ツール</h1>
+<p class="sub">生成済みの積算JSONを読み込み、新旧図面の数量・金額差分を比較します</p>
+
+<div class="main">
+  <!-- ===== 左パネル ===== -->
+  <div class="left">
+    <div class="left-header">
+      <h2>モデル一覧</h2>
+      <div class="left-actions">
+        <button class="btn" onclick="showAddFolder()">＋フォルダ</button>
+        <button class="btn" onclick="showImportModal()">📥 読込</button>
+        <button class="btn" onclick="fetchFromServer()">🌐 サーバー</button>
+      </div>
+    </div>
+    <div class="import-zone" id="importZone">
+      <p>summary JSONファイルをまとめてドロップ<br>またはクリックして選択</p>
+      <input type="file" id="fileInput" multiple accept=".json">
+    </div>
+    <div class="tree-wrap" id="treeWrap"></div>
+  </div>
+  <!-- ===== 右パネル ===== -->
+  <div class="right">
+    <div class="compare-header">
+      <div class="drop-zone old" id="dropOld"
+           ondragover="dzOver(event)" ondragleave="dzLeave(event)" ondrop="dzDrop(event,'old')">
+        <div class="label">🔴 旧（変更前）</div>
+        <div class="placeholder" id="oldPH">← モデルをここにドラッグ</div>
+        <div class="model-name" id="oldName" style="display:none"></div>
+        <div class="model-path" id="oldPath" style="display:none"></div>
+      </div>
+      <div class="drop-zone new" id="dropNew"
+           ondragover="dzOver(event)" ondragleave="dzLeave(event)" ondrop="dzDrop(event,'new')">
+        <div class="label">🟢 新（変更後）</div>
+        <div class="placeholder" id="newPH">← モデルをここにドラッグ</div>
+        <div class="model-name" id="newName" style="display:none"></div>
+        <div class="model-path" id="newPath" style="display:none"></div>
+      </div>
+    </div>
+    <div class="compare-body" id="compareBody">
+      <div class="empty-state">
+        <div class="big">⇄</div>
+        <p>左のツリーから旧・新モデルをドラッグ＆ドロップして比較</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== フォルダ追加モーダル ===== -->
+<div class="modal-bg" id="folderModal">
+  <div class="modal">
+    <h3>フォルダを追加</h3>
+    <label>フォルダ種別</label>
+    <select id="folderType" onchange="onFolderTypeChange()">
+      <option value="original">オリジナル（BASEモデル）</option>
+      <option value="property">物件</option>
+      <option value="year">年度（物件の下）</option>
+    </select>
+    <div id="folderParentWrap" style="display:none">
+      <label>親フォルダ</label>
+      <select id="folderParent"></select>
+    </div>
+    <label>フォルダ名</label>
+    <input id="folderName" placeholder="例: IE-4D1 原型 / 田中様邸 / 2025">
+    <div class="btns">
+      <button class="btn" onclick="closeFolderModal()">キャンセル</button>
+      <button class="btn primary" onclick="addFolder()">追加</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 読込モーダル ===== -->
+<div class="modal-bg" id="importModal">
+  <div class="modal">
+    <h3>モデルデータを読み込み</h3>
+    <label>格納先フォルダ</label>
+    <select id="importTarget"></select>
+    <label>モデル名（任意、空なら自動検出）</label>
+    <input id="importModelName" placeholder="例: ie4d1_2023">
+    <p style="font-size:12px;color:var(--dim);margin-bottom:12px">
+      対象JSON: *_summary.json（根太・垂木・巾木・廻り縁・額縁）
+    </p>
+    <div class="btns">
+      <button class="btn" onclick="closeImportModal()">キャンセル</button>
+      <button class="btn primary" onclick="triggerImport()">ファイル選択</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// =========================================================================
+//  Data Store  (saved to localStorage)
+// =========================================================================
+const STORAGE_KEY = 'talo_hikaku_v1';
+
+// folders: [{id, name, type:'original'|'property'|'year', parentId:null|id}]
+// models:  [{id, name, folderId, data:{neda:{},taruki:{},habaki:{},mawari:{},gakubuchi:{}}}]
+let store = {folders:[], models:[], nextId:1};
+
+function loadStore(){
+  try{
+    const s = localStorage.getItem(STORAGE_KEY);
+    if(s){ store = JSON.parse(s); }
+    if(!store.folders) store.folders=[];
+    if(!store.models) store.models=[];
+    if(!store.nextId) store.nextId=1;
+  }catch(e){ console.warn('store load error',e); }
+  // ensure default originals folder
+  if(!store.folders.find(f=>f.type==='original')){
+    store.folders.push({id:store.nextId++, name:'オリジナル', type:'original', parentId:null});
+    saveStore();
+  }
+}
+function saveStore(){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); }catch(e){}
+}
+function genId(){ return store.nextId++; }
+
+// =========================================================================
+//  Folder / Model helpers
+// =========================================================================
+function getChildFolders(parentId){
+  return store.folders.filter(f=>f.parentId===parentId);
+}
+function getModels(folderId){
+  return store.models.filter(m=>m.folderId===folderId);
+}
+function getFolderPath(folderId){
+  const f = store.folders.find(x=>x.id===folderId);
+  if(!f) return '';
+  if(f.parentId){
+    const pp = getFolderPath(f.parentId);
+    return pp ? pp+' / '+f.name : f.name;
+  }
+  return f.name;
+}
+function getModelPath(modelId){
+  const m = store.models.find(x=>x.id===modelId);
+  if(!m) return '';
+  return getFolderPath(m.folderId) + ' / ' + m.name;
+}
+function deleteFolder(fid){
+  // recursive delete children
+  getChildFolders(fid).forEach(cf=>deleteFolder(cf.id));
+  store.models = store.models.filter(m=>m.folderId!==fid);
+  store.folders = store.folders.filter(f=>f.id!==fid);
+  saveStore();
+}
+function deleteModel(mid){
+  store.models = store.models.filter(m=>m.id!==mid);
+  saveStore();
+}
+
+// =========================================================================
+//  Tree rendering
+// =========================================================================
+let selectedModelId = null;
+let dragModelId = null;
+
+function renderTree(){
+  const wrap = document.getElementById('treeWrap');
+  wrap.innerHTML = '';
+  // top-level = original folders + property folders (parentId===null)
+  const topFolders = store.folders.filter(f=>f.parentId===null);
+  topFolders.forEach(f=>wrap.appendChild(buildFolderNode(f)));
+}
+
+function buildFolderNode(folder){
+  const div = document.createElement('div');
+  div.className = 'tree-node';
+
+  const children = getChildFolders(folder.id);
+  const models = getModels(folder.id);
+  const hasChildren = children.length>0 || models.length>0;
+
+  // row
+  const row = document.createElement('div');
+  row.className = 'tree-row';
+  row.innerHTML = `<span class="arrow ${hasChildren?'open':'empty'}">▶</span>`+
+    `<span class="icon">${folder.type==='original'?'📦':'🏠'}</span>`+
+    `<span class="name">${esc(folder.name)}</span>`+
+    `<span class="badge">${models.length?models.length+'件':''}</span>`;
+
+  // context actions
+  const actBtn = document.createElement('button');
+  actBtn.className='btn danger';actBtn.textContent='✕';actBtn.style.padding='0 4px';actBtn.style.fontSize='10px';
+  actBtn.title='削除';
+  actBtn.onclick=e=>{e.stopPropagation();if(confirm(`"${folder.name}" を削除しますか？`)){deleteFolder(folder.id);renderTree();}};
+  row.appendChild(actBtn);
+
+  div.appendChild(row);
+
+  // children container
+  const childDiv = document.createElement('div');
+  childDiv.className = 'tree-children';
+  children.forEach(cf=>childDiv.appendChild(buildFolderNode(cf)));
+  models.forEach(m=>childDiv.appendChild(buildModelNode(m)));
+  div.appendChild(childDiv);
+
+  // toggle
+  row.onclick = ()=>{
+    const arrow = row.querySelector('.arrow');
+    if(arrow.classList.contains('empty')) return;
+    arrow.classList.toggle('open');
+    childDiv.classList.toggle('collapsed');
+  };
+
+  return div;
+}
+
+function buildModelNode(model){
+  const div = document.createElement('div');
+  div.className = 'tree-node';
+  const row = document.createElement('div');
+  row.className = 'tree-row draggable';
+  row.draggable = true;
+
+  // count available tools
+  const tools = [];
+  if(model.data.neda) tools.push('根太');
+  if(model.data.taruki) tools.push('垂木');
+  if(model.data.habaki) tools.push('巾木');
+  if(model.data.mawari) tools.push('廻縁');
+  if(model.data.gakubuchi) tools.push('額縁');
+
+  row.innerHTML = `<span class="arrow empty">▶</span>`+
+    `<span class="icon">📐</span>`+
+    `<span class="name">${esc(model.name)}</span>`+
+    `<span class="badge">${tools.length}種</span>`;
+
+  // delete
+  const actBtn = document.createElement('button');
+  actBtn.className='btn danger';actBtn.textContent='✕';actBtn.style.padding='0 4px';actBtn.style.fontSize='10px';
+  actBtn.onclick=e=>{e.stopPropagation();if(confirm(`"${model.name}" を削除しますか？`)){deleteModel(model.id);renderTree();}};
+  row.appendChild(actBtn);
+
+  // drag
+  row.ondragstart = e=>{
+    dragModelId = model.id;
+    e.dataTransfer.setData('text/plain', String(model.id));
+    e.dataTransfer.effectAllowed='copy';
+    row.classList.add('dragging');
+  };
+  row.ondragend = ()=>{ row.classList.remove('dragging'); dragModelId=null; };
+
+  div.appendChild(row);
+  return div;
+}
+
+function esc(s){ const d=document.createElement('div');d.textContent=s;return d.innerHTML; }
+
+// =========================================================================
+//  Drop zones (OLD / NEW)
+// =========================================================================
+let oldModelId = null, newModelId = null;
+
+function dzOver(e){ e.preventDefault(); e.currentTarget.classList.add('over'); }
+function dzLeave(e){ e.currentTarget.classList.remove('over'); }
+function dzDrop(e, side){
+  e.preventDefault();
+  e.currentTarget.classList.remove('over');
+  const mid = parseInt(e.dataTransfer.getData('text/plain'));
+  if(!mid) return;
+  const model = store.models.find(m=>m.id===mid);
+  if(!model) return;
+
+  if(side==='old'){
+    oldModelId = mid;
+    document.getElementById('oldPH').style.display='none';
+    document.getElementById('oldName').style.display='';
+    document.getElementById('oldName').textContent = model.name;
+    document.getElementById('oldPath').style.display='';
+    document.getElementById('oldPath').textContent = getModelPath(mid);
+    document.getElementById('dropOld').classList.add('has-data');
+  } else {
+    newModelId = mid;
+    document.getElementById('newPH').style.display='none';
+    document.getElementById('newName').style.display='';
+    document.getElementById('newName').textContent = model.name;
+    document.getElementById('newPath').style.display='';
+    document.getElementById('newPath').textContent = getModelPath(mid);
+    document.getElementById('dropNew').classList.add('has-data');
+  }
+
+  if(oldModelId && newModelId) runCompare();
+}
+
+// =========================================================================
+//  JSON Import
+// =========================================================================
+const importZone = document.getElementById('importZone');
+const fileInput = document.getElementById('fileInput');
+importZone.onclick = ()=> fileInput.click();
+importZone.ondragover = e=>{ e.preventDefault(); importZone.classList.add('over'); };
+importZone.ondragleave = ()=>importZone.classList.remove('over');
+importZone.ondrop = e=>{
+  e.preventDefault(); importZone.classList.remove('over');
+  handleFiles(e.dataTransfer.files, null);
+};
+fileInput.onchange = ()=>{ handleFiles(fileInput.files, null); fileInput.value=''; };
+
+function showImportModal(){
+  refreshTargetSelect('importTarget');
+  document.getElementById('importModal').classList.add('show');
+}
+function closeImportModal(){ document.getElementById('importModal').classList.remove('show'); }
+function triggerImport(){
+  closeImportModal();
+  const targetId = parseInt(document.getElementById('importTarget').value);
+  const modelName = document.getElementById('importModelName').value.trim();
+  // open file picker
+  const inp = document.createElement('input');
+  inp.type='file'; inp.multiple=true; inp.accept='.json';
+  inp.onchange=()=>handleFiles(inp.files, targetId, modelName);
+  inp.click();
+}
+
+function handleFiles(files, targetFolderId, forceName){
+  if(!files||!files.length) return;
+
+  // If no target specified, use first 'original' folder
+  if(!targetFolderId){
+    const orig = store.folders.find(f=>f.type==='original');
+    if(orig) targetFolderId = orig.id;
+    else { targetFolderId = genId(); store.folders.push({id:targetFolderId,name:'オリジナル',type:'original',parentId:null}); }
+  }
+
+  const readers = [];
+  for(const f of files){
+    if(!f.name.endsWith('.json')) continue;
+    readers.push(new Promise(resolve=>{
+      const r = new FileReader();
+      r.onload = ()=>{
+        try{
+          const data = JSON.parse(r.result);
+          resolve({name:f.name, data});
+        }catch(e){ resolve(null); }
+      };
+      r.readAsText(f);
+    }));
+  }
+
+  Promise.all(readers).then(results=>{
+    const valid = results.filter(Boolean);
+    if(!valid.length){ alert('有効なJSONファイルがありません'); return; }
+
+    // group by model name
+    const byModel = {};
+    for(const {name, data} of valid){
+      // detect model name from JSON or filename
+      let modelName = data.model || '';
+      if(!modelName){
+        // try extract from filename: neda_MODEL_summary.json or MODEL_summary.json
+        const m = name.match(/(?:neda_|taruki_|habaki_|gakubuchi_|)(.+?)_summary\.json/);
+        if(m) modelName = m[1];
+        else modelName = name.replace('.json','');
+      }
+      if(forceName) modelName = forceName;
+      if(!byModel[modelName]) byModel[modelName]={};
+
+      const tool = data.tool || '';
+      if(tool==='根太拾い') byModel[modelName].neda = data;
+      else if(tool==='垂木拾い') byModel[modelName].taruki = data;
+      else if(tool==='巾木拾い') byModel[modelName].habaki = data;
+      else if(tool==='廻り縁拾い') byModel[modelName].mawari = data;
+      else if(tool==='額縁拾い') byModel[modelName].gakubuchi = data;
+      else {
+        // unknown tool, try to infer from filename
+        if(name.includes('neda')) byModel[modelName].neda = data;
+        else if(name.includes('taruki')) byModel[modelName].taruki = data;
+        else if(name.includes('habaki')) byModel[modelName].habaki = data;
+        else if(name.includes('gakubuchi')) byModel[modelName].gakubuchi = data;
+        else byModel[modelName].mawari = data; // default
+      }
+    }
+
+    // create or update models
+    for(const [mname, toolData] of Object.entries(byModel)){
+      // check if model already exists in this folder
+      let existing = store.models.find(m=>m.folderId===targetFolderId && m.name===mname);
+      if(existing){
+        // merge
+        Object.assign(existing.data, toolData);
+      } else {
+        store.models.push({
+          id: genId(),
+          name: mname,
+          folderId: targetFolderId,
+          data: toolData
+        });
+      }
+    }
+
+    saveStore();
+    renderTree();
+    alert(`${Object.keys(byModel).length}モデル / ${valid.length}ファイル を読み込みました`);
+  });
+}
+
+// =========================================================================
+//  Folder modal
+// =========================================================================
+function showAddFolder(){
+  document.getElementById('folderName').value='';
+  document.getElementById('folderType').value='original';
+  onFolderTypeChange();
+  document.getElementById('folderModal').classList.add('show');
+}
+function closeFolderModal(){ document.getElementById('folderModal').classList.remove('show'); }
+
+function onFolderTypeChange(){
+  const t = document.getElementById('folderType').value;
+  const pw = document.getElementById('folderParentWrap');
+  if(t==='year'){
+    pw.style.display='';
+    refreshTargetSelect('folderParent', 'property');
+  } else {
+    pw.style.display='none';
+  }
+}
+
+function refreshTargetSelect(selId, typeFilter){
+  const sel = document.getElementById(selId);
+  sel.innerHTML = '';
+  const folders = typeFilter ? store.folders.filter(f=>f.type===typeFilter) : store.folders;
+  for(const f of folders){
+    const opt = document.createElement('option');
+    opt.value = f.id;
+    opt.textContent = getFolderPath(f.id);
+    sel.appendChild(opt);
+  }
+  // if no options, add all
+  if(!sel.options.length){
+    for(const f of store.folders){
+      const opt = document.createElement('option');
+      opt.value = f.id;
+      opt.textContent = getFolderPath(f.id);
+      sel.appendChild(opt);
+    }
+  }
+}
+
+function addFolder(){
+  const t = document.getElementById('folderType').value;
+  const name = document.getElementById('folderName').value.trim();
+  if(!name){ alert('フォルダ名を入力してください'); return; }
+
+  let parentId = null;
+  if(t==='year'){
+    parentId = parseInt(document.getElementById('folderParent').value) || null;
+  }
+
+  store.folders.push({id:genId(), name, type:t, parentId});
+  saveStore();
+  renderTree();
+  closeFolderModal();
+}
+
+// =========================================================================
+//  Comparison Logic
+// =========================================================================
+// Unit prices (rough estimates for diff display)
+const UNIT_PRICES = {
+  neda_m: 400,        // 根太 per meter
+  taruki_m: 500,      // 垂木 per meter
+  habaki_m: 350,      // 巾木 per meter
+  mawari1_m: 300,     // 廻り縁１ per meter
+  mawari2_m: 350,     // 廻り縁２ per meter
+  mawari3_m: 400,     // 廻り縁３ per meter
+  gakubuchi_m: 450,   // 額縁 per meter
+  gakubuchi_uke_m: 300,// 額縁受け per meter
+  tbar_m: 200,        // T-bar per meter
+  kirigoe_m: 350,     // 霧除け per meter
+  kiguchi_m: 250,     // 木口 per meter
+};
+
+function runCompare(){
+  const oldM = store.models.find(m=>m.id===oldModelId);
+  const newM = store.models.find(m=>m.id===newModelId);
+  if(!oldM||!newM) return;
+
+  const body = document.getElementById('compareBody');
+  let html = '';
+
+  // ===== 1. 根太 =====
+  html += buildNedaCompare(oldM.data.neda, newM.data.neda);
+  // ===== 2. 垂木 =====
+  html += buildTarukiCompare(oldM.data.taruki, newM.data.taruki);
+  // ===== 3. 巾木 =====
+  html += buildHabakiCompare(oldM.data.habaki, newM.data.habaki);
+  // ===== 4. 廻り縁 =====
+  html += buildMawariCompare(oldM.data.mawari, newM.data.mawari);
+  // ===== 5. 額縁 =====
+  html += buildGakubuchiCompare(oldM.data.gakubuchi, newM.data.gakubuchi);
+  // ===== 6. 合計 =====
+  html += buildTotalCompare(oldM, newM);
+
+  body.innerHTML = html;
+}
+
+function diffCell(oldV, newV, unit, pricePerUnit){
+  oldV = oldV||0; newV = newV||0;
+  const d = newV - oldV;
+  const cls = d>0?'diff-pos':d<0?'diff-neg':'diff-zero';
+  const sign = d>0?'+':'';
+  const diffStr = `<span class="${cls} diff-cell">${sign}${fmt(d)}${unit}</span>`;
+  let priceStr = '';
+  if(pricePerUnit && d!==0){
+    const dp = d * pricePerUnit;
+    const pcls = dp>0?'diff-pos':dp<0?'diff-neg':'diff-zero';
+    const ps = dp>0?'+':'';
+    priceStr = `<br><span class="${pcls}" style="font-size:11px">${ps}¥${Math.round(dp).toLocaleString()}</span>`;
+  }
+  return `<td class="num">${fmt(oldV)}${unit}</td><td class="num">${fmt(newV)}${unit}</td>`+
+         `<td class="num">${diffStr}${priceStr}</td>`;
+}
+
+function fmt(v){ return typeof v==='number'? (Number.isInteger(v)?v.toLocaleString():v.toFixed(2)) : v; }
+
+// ----- 根太 -----
+function buildNedaCompare(o, n){
+  if(!o&&!n) return '';
+  o=o||{}; n=n||{};
+  let h = '<div class="section-title">根太（ねだ）</div>';
+  h += '<table><tr><th>項目</th><th>旧</th><th>新</th><th>差分</th></tr>';
+
+  // 1F
+  h += `<tr><td>1F 本数</td>${diffCell(o.total_count,n.total_count,'本',0)}</tr>`;
+  h += `<tr><td>1F 合計長さ</td>${diffCell(o.total_length_m,n.total_length_m,'m',UNIT_PRICES.neda_m)}</tr>`;
+  h += `<tr><td>1F 区画数</td>${diffCell(o.compartment_count,n.compartment_count,'',0)}</tr>`;
+  // TB
+  if((o.tb_total_count||0)>0 || (n.tb_total_count||0)>0){
+    h += `<tr><td>テラス/バルコニー 本数</td>${diffCell(o.tb_total_count,n.tb_total_count,'本',0)}</tr>`;
+    h += `<tr><td>テラス/バルコニー 合計長さ</td>${diffCell(o.tb_total_length_m,n.tb_total_length_m,'m',UNIT_PRICES.neda_m)}</tr>`;
+  }
+  // 2F
+  if((o.f2_total_count||0)>0 || (n.f2_total_count||0)>0){
+    h += `<tr><td>2F 本数</td>${diffCell(o.f2_total_count,n.f2_total_count,'本',0)}</tr>`;
+    h += `<tr><td>2F 合計長さ</td>${diffCell(o.f2_total_length_m,n.f2_total_length_m,'m',UNIT_PRICES.neda_m)}</tr>`;
+  }
+  // pitch
+  h += `<tr class="subtotal"><td>ピッチ</td><td class="num">${o.pitch_mm||'-'}mm</td><td class="num">${n.pitch_mm||'-'}mm</td><td class="num">${(o.pitch_mm||0)===(n.pitch_mm||0)?'同一':'<span class="diff-pos">変更</span>'}</td></tr>`;
+  h += '</table>';
+  return h;
+}
+
+// ----- 垂木 -----
+function buildTarukiCompare(o, n){
+  if(!o&&!n) return '';
+  o=o||{}; n=n||{};
+  let h = '<div class="section-title">垂木（たるき）</div>';
+  h += '<table><tr><th>項目</th><th>旧</th><th>新</th><th>差分</th></tr>';
+  h += `<tr><td>合計本数</td>${diffCell(o.total_count,n.total_count,'本',0)}</tr>`;
+  h += `<tr><td>合計長さ</td>${diffCell(o.total_length_m,n.total_length_m,'m',UNIT_PRICES.taruki_m)}</tr>`;
+  h += `<tr><td>1本あたり長さ</td>${diffCell(o.single_length_m,n.single_length_m,'m',0)}</tr>`;
+  h += `<tr class="subtotal"><td>ピッチ</td><td class="num">${o.pitch_mm||'-'}mm</td><td class="num">${n.pitch_mm||'-'}mm</td><td class="num">${(o.pitch_mm||0)===(n.pitch_mm||0)?'同一':'<span class="diff-pos">変更</span>'}</td></tr>`;
+  // count by reason
+  const reasons = new Set([...Object.keys(o.count_by_reason||{}), ...Object.keys(n.count_by_reason||{})]);
+  for(const r of reasons){
+    const ov = (o.count_by_reason||{})[r]||0;
+    const nv = (n.count_by_reason||{})[r]||0;
+    h += `<tr><td>　${r}</td>${diffCell(ov,nv,'本',0)}</tr>`;
+  }
+  h += '</table>';
+  return h;
+}
+
+// ----- 巾木 -----
+function buildHabakiCompare(o, n){
+  if(!o&&!n) return '';
+  o=o||{}; n=n||{};
+  let h = '<div class="section-title">巾木（はばき）</div>';
+  h += '<table><tr><th>項目</th><th>旧</th><th>新</th><th>差分</th></tr>';
+  h += `<tr class="subtotal"><td>合計</td>${diffCell(o.grand_total,n.grand_total,'m',UNIT_PRICES.habaki_m)}</tr>`;
+  for(const fl of ['1F','2F']){
+    const oft = (o.floor_totals||{})[fl]||{};
+    const nft = (n.floor_totals||{})[fl]||{};
+    if((oft.total||0)===0 && (nft.total||0)===0) continue;
+    h += `<tr><td>${fl} 外周</td>${diffCell(oft.ext,nft.ext,'m',UNIT_PRICES.habaki_m)}</tr>`;
+    h += `<tr><td>${fl} 室内</td>${diffCell(oft.int,nft.int,'m',UNIT_PRICES.habaki_m)}</tr>`;
+    h += `<tr><td>${fl} 小計</td>${diffCell(oft.total,nft.total,'m',0)}</tr>`;
+  }
+  h += '</table>';
+  return h;
+}
+
+// ----- 廻り縁 -----
+function buildMawariCompare(o, n){
+  if(!o&&!n) return '';
+  o=o||{}; n=n||{};
+  let h = '<div class="section-title">廻り縁（まわりぶち）</div>';
+  h += '<table><tr><th>項目</th><th>旧</th><th>新</th><th>差分</th></tr>';
+  h += `<tr class="subtotal"><td>合計</td>${diffCell(o.grand_total,n.grand_total,'m',UNIT_PRICES.mawari1_m)}</tr>`;
+  for(const t of ['廻り縁１','廻り縁２','廻り縁３']){
+    const ov = (o.type_totals||{})[t]||0;
+    const nv = (n.type_totals||{})[t]||0;
+    if(ov===0&&nv===0) continue;
+    const up = t==='廻り縁１'?UNIT_PRICES.mawari1_m:t==='廻り縁２'?UNIT_PRICES.mawari2_m:UNIT_PRICES.mawari3_m;
+    h += `<tr><td>${t}</td>${diffCell(ov,nv,'m',up)}</tr>`;
+  }
+  for(const fl of ['1F','2F']){
+    const ov = (o.floor_totals||{})[fl]||0;
+    const nv = (n.floor_totals||{})[fl]||0;
+    if(ov===0&&nv===0) continue;
+    h += `<tr><td>${fl} 小計</td>${diffCell(ov,nv,'m',0)}</tr>`;
+  }
+  h += '</table>';
+  return h;
+}
+
+// ----- 額縁 -----
+function buildGakubuchiCompare(o, n){
+  if(!o&&!n) return '';
+  o=o||{}; n=n||{};
+  let h = '<div class="section-title">額縁（がくぶち）</div>';
+  h += '<table><tr><th>項目</th><th>旧</th><th>新</th><th>差分</th></tr>';
+  h += `<tr class="subtotal"><td>合計</td>${diffCell(o.grand_total,n.grand_total,'m',UNIT_PRICES.gakubuchi_m)}</tr>`;
+  const kinds = {'額縁':'gakubuchi_m','額縁受け':'gakubuchi_uke_m','T-bar':'tbar_m','霧除け':'kirigoe_m','木口':'kiguchi_m'};
+  for(const [k,pk] of Object.entries(kinds)){
+    const ov = (o.type_totals||{})[k]||0;
+    const nv = (n.type_totals||{})[k]||0;
+    if(ov===0&&nv===0) continue;
+    h += `<tr><td>${k}</td>${diffCell(ov,nv,'m',UNIT_PRICES[pk])}</tr>`;
+  }
+  // fixture count
+  const ofc = (o.fixtures||[]).length;
+  const nfc = (n.fixtures||[]).length;
+  h += `<tr><td>建具数</td>${diffCell(ofc,nfc,'箇所',0)}</tr>`;
+  h += '</table>';
+  return h;
+}
+
+// ----- 合計サマリー -----
+function buildTotalCompare(oldM, newM){
+  const o = oldM.data, n = newM.data;
+  let h = '<div class="section-title">💰 金額差分サマリー（概算）</div>';
+  h += '<table><tr><th>部材</th><th>旧 長さ</th><th>新 長さ</th><th>差分長さ</th><th>概算単価</th><th>概算差額</th></tr>';
+
+  const items = [];
+  // 根太
+  if(o.neda||n.neda){
+    const ol = (o.neda?.total_length_m||0)+(o.neda?.tb_total_length_m||0)+(o.neda?.f2_total_length_m||0);
+    const nl = (n.neda?.total_length_m||0)+(n.neda?.tb_total_length_m||0)+(n.neda?.f2_total_length_m||0);
+    items.push({name:'根太', ol, nl, up:UNIT_PRICES.neda_m});
+  }
+  if(o.taruki||n.taruki){
+    items.push({name:'垂木', ol:o.taruki?.total_length_m||0, nl:n.taruki?.total_length_m||0, up:UNIT_PRICES.taruki_m});
+  }
+  if(o.habaki||n.habaki){
+    items.push({name:'巾木', ol:o.habaki?.grand_total||0, nl:n.habaki?.grand_total||0, up:UNIT_PRICES.habaki_m});
+  }
+  if(o.mawari||n.mawari){
+    items.push({name:'廻り縁', ol:o.mawari?.grand_total||0, nl:n.mawari?.grand_total||0, up:UNIT_PRICES.mawari1_m});
+  }
+  if(o.gakubuchi||n.gakubuchi){
+    items.push({name:'額縁', ol:o.gakubuchi?.grand_total||0, nl:n.gakubuchi?.grand_total||0, up:UNIT_PRICES.gakubuchi_m});
+  }
+
+  let totalDiffPrice = 0;
+  for(const it of items){
+    const d = it.nl - it.ol;
+    const dp = d * it.up;
+    totalDiffPrice += dp;
+    const cls = d>0?'diff-pos':d<0?'diff-neg':'diff-zero';
+    const sign = d>0?'+':'';
+    const pcls = dp>0?'diff-pos':dp<0?'diff-neg':'diff-zero';
+    const ps = dp>0?'+':'';
+    h += `<tr><td>${it.name}</td>`;
+    h += `<td class="num">${it.ol.toFixed(2)}m</td>`;
+    h += `<td class="num">${it.nl.toFixed(2)}m</td>`;
+    h += `<td class="num"><span class="${cls} diff-cell">${sign}${d.toFixed(2)}m</span></td>`;
+    h += `<td class="num">¥${it.up.toLocaleString()}/m</td>`;
+    h += `<td class="num"><span class="${pcls} diff-cell">${ps}¥${Math.round(dp).toLocaleString()}</span></td>`;
+    h += '</tr>';
+  }
+
+  // total row
+  const tcls = totalDiffPrice>0?'diff-pos':totalDiffPrice<0?'diff-neg':'diff-zero';
+  const ts = totalDiffPrice>0?'+':'';
+  h += `<tr class="subtotal"><td>合計差額</td><td></td><td></td><td></td><td></td>`;
+  h += `<td class="num"><span class="${tcls} diff-cell" style="font-size:16px">${ts}¥${Math.round(totalDiffPrice).toLocaleString()}</span></td></tr>`;
+  h += '</table>';
+
+  h += '<p style="font-size:11px;color:var(--dim);margin-top:4px">※ 単価は概算値です。実際の価格は部材の種類・サイズにより異なります。単価設定はソースコード内のUNIT_PRICESで変更可能です。</p>';
+
+  // Print button
+  h += '<div style="text-align:right;margin-top:16px"><button class="btn primary" onclick="window.print()">🖨 印刷 / PDF</button></div>';
+
+  return h;
+}
+
+// =========================================================================
+//  Export / Import store (backup)
+// =========================================================================
+function exportStore(){
+  const blob = new Blob([JSON.stringify(store, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'hikaku_store.json';
+  a.click();
+}
+
+// =========================================================================
+//  Auto-fetch from server (manifest.json)
+// =========================================================================
+async function fetchFromServer(){
+  const BASE = location.origin + location.pathname.replace(/\/[^/]*$/,'/');
+  try{
+    const res = await fetch(BASE + 'manifest.json');
+    if(!res.ok) throw new Error('manifest not found');
+    const manifest = await res.json();
+    const models = manifest.models || {};
+
+    // ensure "サーバー" folder
+    let serverFolder = store.folders.find(f=>f.name==='サーバー（自動取得）');
+    if(!serverFolder){
+      serverFolder = {id:genId(), name:'サーバー（自動取得）', type:'original', parentId:null};
+      store.folders.push(serverFolder);
+    }
+
+    let loaded = 0;
+    for(const [modelName, info] of Object.entries(models)){
+      const files = info.files || {};
+      const toolData = {};
+
+      for(const [toolName, filename] of Object.entries(files)){
+        try{
+          const r = await fetch(BASE + filename);
+          if(r.ok){
+            const data = await r.json();
+            if(toolName==='根太拾い') toolData.neda = data;
+            else if(toolName==='垂木拾い') toolData.taruki = data;
+            else if(toolName==='巾木拾い') toolData.habaki = data;
+            else if(toolName==='廻り縁拾い') toolData.mawari = data;
+            else if(toolName==='額縁拾い') toolData.gakubuchi = data;
+          }
+        }catch(e){ console.warn('fetch failed:', filename, e); }
+      }
+
+      if(Object.keys(toolData).length > 0){
+        let existing = store.models.find(m=>m.folderId===serverFolder.id && m.name===modelName);
+        if(existing){ Object.assign(existing.data, toolData); }
+        else { store.models.push({id:genId(), name:modelName, folderId:serverFolder.id, data:toolData}); }
+        loaded++;
+      }
+    }
+
+    saveStore();
+    renderTree();
+    if(loaded>0) alert(`サーバーから ${loaded} モデルを読み込みました`);
+    else alert('サーバーにモデルデータがありません');
+  }catch(e){
+    console.warn('Server fetch failed:', e);
+    alert('サーバーからの読み込みに失敗しました（ローカルファイルとして開いている場合は、JSONファイルを手動で読み込んでください）');
+  }
+}
+
+// =========================================================================
+//  Init
+// =========================================================================
+loadStore();
+renderTree();
+
+// Auto-fetch from server if hosted on GitHub Pages
+if(location.protocol.startsWith('http')){
+  fetchFromServer().catch(()=>{});
+}
+</script>
+</body>
+</html>
