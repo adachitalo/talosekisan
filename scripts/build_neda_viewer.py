@@ -579,17 +579,9 @@ def detect_2f_compartments(ifc, settings):
     # =====================================================================
     # 区画グリッド生成（ログ壁ベース → 梁はセル交差時のみ分割）
     # =====================================================================
-    # Step 1: ログ壁のみでベースグリッドを作成
-    # 根太方向に直交する壁のみ区画境界として使用
-    # （平行な壁は根太スパンに影響しないため無視）
-    if joist_dir == "x":
-        # 根太がX方向 → X境界（Y方向壁）のみ使用、Y境界（X方向壁）は無視
-        x_bounds = sorted(set([all_x_min] + list(wall_x_boundaries) + [all_x_max]))
-        y_bounds = [all_y_min, all_y_max]
-    else:
-        # 根太がY方向 → Y境界（X方向壁）のみ使用、X境界（Y方向壁）は無視
-        x_bounds = [all_x_min, all_x_max]
-        y_bounds = sorted(set([all_y_min] + list(wall_y_boundaries) + [all_y_max]))
+    # Step 1: ログ壁の全境界でベースグリッドを作成
+    x_bounds = sorted(set([all_x_min] + list(wall_x_boundaries) + [all_x_max]))
+    y_bounds = sorted(set([all_y_min] + list(wall_y_boundaries) + [all_y_max]))
 
     print(f"\n  ログ壁ベースグリッド:")
     print(f"    X境界: {[round(x,3) for x in x_bounds]}")
@@ -696,7 +688,45 @@ def detect_2f_compartments(ifc, settings):
                 new_cells.append((x1, x2, y1, y2))
         base_cells = new_cells
 
-    print(f"  梁分割後セル（統合後）: {len(base_cells)}個")
+    print(f"  狭セル統合後: {len(base_cells)}個")
+
+    # Step 3c: 根太方向と平行に隣接し、直交方向の範囲が同じセルを統合
+    # （例: joist_dir=x のとき、X範囲が同じでY方向に隣接するセルをマージ）
+    merged = True
+    while merged:
+        merged = False
+        new_cells = []
+        skip = set()
+        for i, (x1, x2, y1, y2) in enumerate(base_cells):
+            if i in skip:
+                continue
+            found = False
+            for j, (ax1, ax2, ay1, ay2) in enumerate(base_cells):
+                if j <= i or j in skip:
+                    continue
+                if joist_dir == "x":
+                    # X範囲が同じ && Y方向で隣接 → 統合
+                    if abs(x1 - ax1) < 0.01 and abs(x2 - ax2) < 0.01:
+                        if abs(y2 - ay1) < 0.01 or abs(ay2 - y1) < 0.01:
+                            new_cells.append((x1, x2, min(y1, ay1), max(y2, ay2)))
+                            skip.add(j)
+                            found = True
+                            merged = True
+                            break
+                else:
+                    # Y範囲が同じ && X方向で隣接 → 統合
+                    if abs(y1 - ay1) < 0.01 and abs(y2 - ay2) < 0.01:
+                        if abs(x2 - ax1) < 0.01 or abs(ax2 - x1) < 0.01:
+                            new_cells.append((min(x1, ax1), max(x2, ax2), y1, y2))
+                            skip.add(j)
+                            found = True
+                            merged = True
+                            break
+            if not found:
+                new_cells.append((x1, x2, y1, y2))
+        base_cells = new_cells
+
+    print(f"  同一構造セル統合後: {len(base_cells)}個")
 
     # Step 4: セルから区画を生成（根太方向4m超なら分割）
     compartments = []
