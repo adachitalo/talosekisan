@@ -857,6 +857,7 @@ _zm(f){{const o=this.c.position.clone().sub(this.t);o.multiplyScalar(f);this.c.p
 
 // 建物メッシュ
 const buildingGroup=new THREE.Group();
+const edgesGroup=new THREE.Group();
 const catGroups={{}};const bbox=new THREE.Box3();
 MESHES.forEach(m=>{{
   const g=new THREE.BufferGeometry();
@@ -868,6 +869,10 @@ MESHES.forEach(m=>{{
   if(!catGroups[m.cat]){{catGroups[m.cat]=new THREE.Group();}}
   catGroups[m.cat].add(mesh);
   bbox.expandByObject(mesh);
+  const eg=new THREE.EdgesGeometry(g,20);const epos=eg.attributes.position.array;
+  const lsg=new THREE.LineSegmentsGeometry();lsg.setPositions(epos);
+  const lsm=new THREE.LineMaterial({{color:color.getHex(),linewidth:2,transparent:true,opacity:0.6,resolution:new THREE.Vector2(innerWidth,innerHeight)}});
+  edgesGroup.add(new THREE.LineSegments2(lsg,lsm));
 }});
 // 屋根・天窓はbuildingGroupの外（独立制御）
 Object.keys(catGroups).forEach(c=>{{
@@ -875,6 +880,7 @@ Object.keys(catGroups).forEach(c=>{{
   else{{buildingGroup.add(catGroups[c]);}}
 }});
 scene.add(buildingGroup);
+scene.add(edgesGroup);
 Object.keys(HIDDEN_CATS).forEach(c=>{{if(catGroups[c])catGroups[c].visible=false;}});
 
 // 額縁ライン
@@ -977,9 +983,12 @@ kindOrder.forEach(k=>{{
   const legItems=leg.querySelectorAll('div');legItems.forEach(d=>{{if(d.textContent.startsWith(k))d.style.opacity=frameGroups[k].visible?1:0.3;}});}}}};
   ctrlDiv.appendChild(btn);
 }});
-const btnB=document.createElement('button');btnB.id='btn-building';btnB.textContent='建物表示';btnB.className='active';
+const btnB=document.createElement('button');btnB.id='btn-building';btnB.textContent='建物透過';btnB.className='active';
 btnB.onclick=()=>{{let showB=buildingGroup.visible;showB=!showB;buildingGroup.visible=showB;btnB.classList.toggle('active',showB);}};
 ctrlDiv.appendChild(btnB);
+const btnE=document.createElement('button');btnE.id='btn-edges';btnE.textContent='輪郭';btnE.className='active';
+btnE.onclick=()=>{{let showE=edgesGroup.visible;showE=!showE;edgesGroup.visible=showE;btnE.classList.toggle('active',showE);}};
+ctrlDiv.appendChild(btnE);
 const btnR=document.createElement('button');btnR.textContent='リセット';
 btnR.onclick=resetCam;ctrlDiv.appendChild(btnR);
 

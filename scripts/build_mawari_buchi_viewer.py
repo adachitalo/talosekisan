@@ -1312,7 +1312,8 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
   <button id="btn-m1" class="active" onclick="toggleType('廻り縁１')">廻り縁１</button>
   <button id="btn-m2" class="active" onclick="toggleType('廻り縁２')">廻り縁２</button>
   <button id="btn-m3" class="active" onclick="toggleType('廻り縁３')">廻り縁３</button>
-  <button id="btn-building" class="active" onclick="toggleBuilding()">建物表示</button>
+  <button id="btn-building" class="active" onclick="toggleBuilding()">建物透過</button>
+  <button id="btn-edges" class="active" onclick="toggleEdges()">輪郭</button>
   <button onclick="resetCam()">リセット</button>
 </div>
 
@@ -1377,6 +1378,7 @@ _zm(f){{const o=this.c.position.clone().sub(this.t);o.multiplyScalar(f);this.c.p
 }}
 
 const buildingGroup=new THREE.Group();
+const edgesGroup=new THREE.Group();
 const catGroups={{}};const allMeshes=[];const bbox=new THREE.Box3();
 MESHES.forEach(m=>{{
 const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(m.verts,3));
@@ -1386,8 +1388,13 @@ const mat=new THREE.MeshLambertMaterial({{color:new THREE.Color(color),transpare
 const mesh=new THREE.Mesh(g,mat);mesh.userData={{cat:m.cat,name:m.name,gid:m.gid}};
 if(!catGroups[m.cat]){{catGroups[m.cat]=new THREE.Group();buildingGroup.add(catGroups[m.cat]);}}
 catGroups[m.cat].add(mesh);allMeshes.push(mesh);bbox.expandByObject(mesh);
+const eg=new THREE.EdgesGeometry(g,20);const epos=eg.attributes.position.array;
+const lsg=new THREE.LineSegmentsGeometry();lsg.setPositions(epos);
+const lsm=new THREE.LineMaterial({{color:new THREE.Color(color).getHex(),linewidth:2,transparent:true,opacity:0.6,resolution:new THREE.Vector2(innerWidth,innerHeight)}});
+edgesGroup.add(new THREE.LineSegments2(lsg,lsm));
 }});
 scene.add(buildingGroup);
+scene.add(edgesGroup);
 
 const moldingGroups = {{}};
 ["廻り縁１","廻り縁２","廻り縁３"].forEach(mt=>{{moldingGroups[mt]=new THREE.Group();scene.add(moldingGroups[mt]);}});
@@ -1463,6 +1470,8 @@ function toggleType(mt){{
   if(btn) btn.classList.toggle('active',typeVisible[mt]);
 }}
 function toggleBuilding(){{showB=!showB;buildingGroup.visible=showB;document.getElementById('btn-building').classList.toggle('active',showB);}}
+let showE=true;
+function toggleEdges(){{showE=!showE;edgesGroup.visible=showE;document.getElementById('btn-edges').classList.toggle('active',showE);}}
 
 const grid=new THREE.GridHelper(20,40,0x444444,0x333333);grid.position.copy(center);grid.position.y=0;scene.add(grid);
 (function anim(){{requestAnimationFrame(anim);renderer.render(scene,camera);}})();

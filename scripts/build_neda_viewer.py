@@ -1693,10 +1693,12 @@ const mat=new THREE.MeshLambertMaterial({{color:new THREE.Color(color),transpare
 const mesh=new THREE.Mesh(g,mat);mesh.userData={{cat:m.cat,name:m.name,gid:m.gid}};
 if(!catGroups[m.cat]){{catGroups[m.cat]=new THREE.Group();buildingGroup.add(catGroups[m.cat]);}}
 catGroups[m.cat].add(mesh);allMeshes.push(mesh);bbox.expandByObject(mesh);
-// 輪郭線
+// 輪郭線（太線）
 const eg=new THREE.EdgesGeometry(g,20);
-const em=new THREE.LineBasicMaterial({{color:new THREE.Color(color),transparent:true,opacity:0.5}});
-const el=new THREE.LineSegments(eg,em);
+const epos=eg.attributes.position.array;
+const lsg=new THREE.LineSegmentsGeometry();lsg.setPositions(epos);
+const lsm=new THREE.LineMaterial({{color:new THREE.Color(color).getHex(),linewidth:2,transparent:true,opacity:0.6,resolution:new THREE.Vector2(innerWidth,innerHeight)}});
+const el=new THREE.LineSegments2(lsg,lsm);
 edgesGroup.add(el);
 }});
 scene.add(buildingGroup);
