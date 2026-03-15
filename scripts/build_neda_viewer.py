@@ -709,18 +709,7 @@ COMPARTMENTS.forEach((c,i)=>{{
   mesh.rotation.x=-Math.PI/2;
   mesh.position.set((c.x_min+c.x_max)/2, slabY+0.005, (c.z_min+c.z_max)/2);
   compGroup.add(mesh);
-  // 区画枠線
-  const pts=[
-    new THREE.Vector3(c.x_min, slabY+0.01, c.z_min),
-    new THREE.Vector3(c.x_max, slabY+0.01, c.z_min),
-    new THREE.Vector3(c.x_max, slabY+0.01, c.z_max),
-    new THREE.Vector3(c.x_min, slabY+0.01, c.z_max),
-    new THREE.Vector3(c.x_min, slabY+0.01, c.z_min),
-  ];
-  const posArr=[];pts.forEach(p=>posArr.push(p.x,p.y,p.z));
-  const lg=new THREE.LineGeometry();lg.setPositions(posArr);
-  const lmat=new THREE.LineMaterial({{color,linewidth:4,resolution:new THREE.Vector2(innerWidth,innerHeight)}});
-  compGroup.add(new THREE.Line2(lg,lmat));
+  // 区画枠線（太線は不要なので削除済み — 半透明面のみ表示）
 }});
 
 // 根太ライン描画
