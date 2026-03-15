@@ -276,6 +276,132 @@ def detect_kiso_compartments(ifc, settings, rp):
 
 
 ###############################################################################
+# 2Fスラブ開口検出
+###############################################################################
+
+def detect_2f_openings(ifc, settings):
+    """2Fスラブの開口（階段の吹き抜け等）を検出する。
+
+    スラブ上面のポリゴン頂点からBBの欠け部分（開口）を矩形で検出する。
+    スラブ形状がBB通りの単純矩形なら開口なし。
+    内部頂点（BB辺上でない頂点）が存在すれば、グリッド分割して
+    スラブが存在しないセルを開口として返す。
+
+    Returns: list of dicts with x_min, x_max, y_min, y_max (IFC座標)
+    """
+    slabs = ifc.by_type("IfcSlab")
+    openings = []
+
+    for slab in slabs:
+        name = (slab.Name or "").lower()
+        if "2-yuka" not in name and "2f" not in name:
+            continue
+        try:
+            shape = ifcopenshell.geom.create_shape(settings, slab)
+            vf = shape.geometry.verts
+            ff = shape.geometry.faces
+            va = np.array(vf).reshape(-1, 3)
+            fa = np.array(ff).reshape(-1, 3)
+
+            z_max = va[:, 2].max()
+
+            # 上面頂点を取得
+            top_mask = va[:, 2] > z_max - 0.01
+            top_pts = va[top_mask]
+            unique_xy = np.unique(np.round(top_pts[:, :2], 3), axis=0)
+
+            bb_xmin, bb_xmax = va[:, 0].min(), va[:, 0].max()
+            bb_ymin, bb_ymax = va[:, 1].min(), va[:, 1].max()
+
+            # 単純矩形（4頂点）なら開口なし
+            if len(unique_xy) <= 4:
+                continue
+
+            # 全てのX, Y座標を収集してグリッドを作成
+            all_x = sorted(set(round(p[0], 3) for p in unique_xy))
+            all_y = sorted(set(round(p[1], 3) for p in unique_xy))
+
+            # 上面の三角形を収集
+            top_tris = []
+            for f in fa:
+                pts = va[f]
+                if all(abs(p[2] - z_max) < 0.01 for p in pts):
+                    top_tris.append(pts[:, :2])  # XY only
+
+            # グリッドセルごとにスラブ存在判定（中心点がスラブ三角形内にあるか）
+            def point_in_tri(p, t):
+                """点pが三角形t内にあるか（2D）"""
+                v0 = t[2] - t[0]
+                v1 = t[1] - t[0]
+                v2 = p - t[0]
+                d00 = np.dot(v0, v0)
+                d01 = np.dot(v0, v1)
+                d02 = np.dot(v0, v2)
+                d11 = np.dot(v1, v1)
+                d12 = np.dot(v1, v2)
+                inv = d00 * d11 - d01 * d01
+                if abs(inv) < 1e-10:
+                    return False
+                u = (d11 * d02 - d01 * d12) / inv
+                v = (d00 * d12 - d01 * d02) / inv
+                return u >= -0.001 and v >= -0.001 and u + v <= 1.001
+
+            for xi in range(len(all_x) - 1):
+                for yi in range(len(all_y) - 1):
+                    cx = (all_x[xi] + all_x[xi + 1]) / 2
+                    cy = (all_y[yi] + all_y[yi + 1]) / 2
+                    center = np.array([cx, cy])
+
+                    in_slab = False
+                    for tri in top_tris:
+                        if point_in_tri(center, tri):
+                            in_slab = True
+                            break
+
+                    if not in_slab:
+                        openings.append({
+                            "x_min": all_x[xi],
+                            "x_max": all_x[xi + 1],
+                            "y_min": all_y[yi],
+                            "y_max": all_y[yi + 1],
+                        })
+
+        except Exception as e:
+            print(f"  WARNING: 開口検出失敗 ({slab.Name}): {e}")
+
+    # 隣接する開口セルを統合（同じX範囲のY連続セル / 同じY範囲のX連続セル）
+    if len(openings) > 1:
+        merged = [openings[0]]
+        for o in openings[1:]:
+            prev = merged[-1]
+            # Y方向に隣接（同じX範囲）
+            if (abs(o["x_min"] - prev["x_min"]) < 0.01 and
+                abs(o["x_max"] - prev["x_max"]) < 0.01 and
+                abs(o["y_min"] - prev["y_max"]) < 0.01):
+                prev["y_max"] = o["y_max"]
+            # X方向に隣接（同じY範囲）
+            elif (abs(o["y_min"] - prev["y_min"]) < 0.01 and
+                  abs(o["y_max"] - prev["y_max"]) < 0.01 and
+                  abs(o["x_min"] - prev["x_max"]) < 0.01):
+                prev["x_max"] = o["x_max"]
+            else:
+                merged.append(o)
+        openings = merged
+
+    if openings:
+        print(f"\n  2Fスラブ開口: {len(openings)}箇所")
+        for idx, o in enumerate(openings):
+            w = o["x_max"] - o["x_min"]
+            h = o["y_max"] - o["y_min"]
+            print(f"    開口{idx+1}: X=[{o['x_min']:.3f},{o['x_max']:.3f}] "
+                  f"Y=[{o['y_min']:.3f},{o['y_max']:.3f}] ({w:.3f} x {h:.3f}m)")
+    else:
+        print("\n  2Fスラブ開口: なし")
+
+    return openings
+
+
+###############################################################################
 # 2F区画検出（集成梁方向判定付き）
 ###############################################################################
 
@@ -291,7 +417,7 @@ def detect_2f_compartments(ifc, settings):
     6. 全根太の方向を統一（集成梁の主方向の多数決）
     7. 4m超のスパンは区画を分割
 
-    Returns: list of dicts (2F区画), str (joist_dir)
+    Returns: list of dicts (2F区画), str (joist_dir), list of dicts (openings)
     """
     slabs = ifc.by_type("IfcSlab")
     slab_2f_list = []
@@ -318,7 +444,7 @@ def detect_2f_compartments(ifc, settings):
 
     if not slab_2f_list:
         print("  2Fスラブなし（平屋）")
-        return [], ""
+        return [], "", []
 
     # 全2Fスラブの統合BB（通常は1つだが複数ある場合も対応）
     all_x_min = min(s["x_min"] for s in slab_2f_list)
@@ -536,12 +662,19 @@ def detect_2f_compartments(ifc, settings):
 
 
 ###############################################################################
-# 2F根太配置
+# 2F根太配置（開口対応）
 ###############################################################################
 
-def place_joists_2f(compartments, joist_dir, pitch=0.455):
-    """2F区画ごとに根太を配置。place_joists_tbと同じロジック。"""
+def place_joists_2f(compartments, joist_dir, openings=None, pitch=0.455):
+    """2F区画ごとに根太を配置。開口部分は根太をクリッピングまたはスキップ。
+
+    開口処理:
+    - 根太が開口と交差する場合、開口の手前と奥の2本に分割
+    - 根太が開口内に完全に収まる場合はスキップ
+    """
     joists = []
+    if openings is None:
+        openings = []
 
     for comp_idx, comp in enumerate(compartments):
         if joist_dir == "x":
@@ -554,8 +687,6 @@ def place_joists_2f(compartments, joist_dir, pitch=0.455):
             joist_end = comp["y_max"]
             pitch_start = comp["x_min"]
             pitch_end = comp["x_max"]
-
-        joist_length = abs(joist_end - joist_start)
 
         positions = [
             {"pos": pitch_start, "reason": "区画端部"},
@@ -577,16 +708,64 @@ def place_joists_2f(compartments, joist_dir, pitch=0.455):
             merged.append(p)
 
         for p in merged:
-            joists.append({
-                "comp_idx": comp_idx,
-                "pos": p["pos"],
-                "reason": p["reason"],
-                "joist_start": joist_start,
-                "joist_end": joist_end,
-                "length": joist_length,
-                "joist_dir": joist_dir,
-                "slab_top_z": comp["slab_top_z"],
-            })
+            # 開口チェック: 根太が開口と交差するか
+            j_start = joist_start
+            j_end = joist_end
+            pos_val = p["pos"]
+
+            # この根太に影響する開口を収集
+            # 根太のpitch方向位置(pos_val)が開口のpitch範囲内にあるか
+            clipped_segments = [(j_start, j_end)]
+
+            for opening in openings:
+                if joist_dir == "x":
+                    # 根太はX方向、pos=IFC Y座標
+                    op_pitch_min = opening["y_min"]
+                    op_pitch_max = opening["y_max"]
+                    op_joist_min = opening["x_min"]
+                    op_joist_max = opening["x_max"]
+                else:
+                    # 根太はY方向、pos=IFC X座標
+                    op_pitch_min = opening["x_min"]
+                    op_pitch_max = opening["x_max"]
+                    op_joist_min = opening["y_min"]
+                    op_joist_max = opening["y_max"]
+
+                # この根太のpitch位置が開口のpitch範囲内か
+                if pos_val < op_pitch_min - 0.01 or pos_val > op_pitch_max + 0.01:
+                    continue  # この開口は影響しない
+
+                # 根太の走行方向で開口と交差 → セグメントをクリップ
+                new_segments = []
+                for seg_start, seg_end in clipped_segments:
+                    if seg_end <= op_joist_min + 0.01 or seg_start >= op_joist_max - 0.01:
+                        # 開口と重ならない
+                        new_segments.append((seg_start, seg_end))
+                    else:
+                        # 開口の手前部分
+                        if seg_start < op_joist_min - 0.01:
+                            new_segments.append((seg_start, op_joist_min))
+                        # 開口の奥部分
+                        if seg_end > op_joist_max + 0.01:
+                            new_segments.append((op_joist_max, seg_end))
+                        # 完全に開口内 → スキップ
+                clipped_segments = new_segments
+
+            # クリップ後のセグメントを根太として追加
+            for seg_start, seg_end in clipped_segments:
+                seg_len = abs(seg_end - seg_start)
+                if seg_len < 0.05:  # 5cm未満はスキップ
+                    continue
+                joists.append({
+                    "comp_idx": comp_idx,
+                    "pos": pos_val,
+                    "reason": p["reason"],
+                    "joist_start": seg_start,
+                    "joist_end": seg_end,
+                    "length": seg_len,
+                    "joist_dir": joist_dir,
+                    "slab_top_z": comp["slab_top_z"],
+                })
 
     return joists
 
@@ -988,6 +1167,12 @@ def main():
     print("\n2F区画検出中...")
     f2_compartments, f2_joist_dir = detect_2f_compartments(ifc, settings)
 
+    # === Part 4c: 2Fスラブ開口検出 ===
+    f2_openings = []
+    if f2_compartments:
+        print("\n2Fスラブ開口検出中...")
+        f2_openings = detect_2f_openings(ifc, settings)
+
     # === Part 5-6: ピッチ別に根太配置＆ライン生成（1F + テラス・バルコニー + 2F） ===
     all_pitch_data = {}
     all_tb_pitch_data = {}
@@ -1066,7 +1251,7 @@ def main():
         # --- 2F根太 ---
         if f2_compartments:
             print(f"  2F根太配置計算中... (ピッチ: {pitch_mm}mm)")
-            f2_joists = place_joists_2f(f2_compartments, f2_joist_dir, pitch=pitch)
+            f2_joists = place_joists_2f(f2_compartments, f2_joist_dir, openings=f2_openings, pitch=pitch)
             f2_joist_lines = generate_joist_lines_2f(f2_joists)
             print(f"  2F根太ライン: {len(f2_joist_lines)}本")
 
@@ -1164,6 +1349,17 @@ def main():
         })
     f2_compartments_json = json.dumps(f2_comp_data, ensure_ascii=False)
 
+    # 2F開口情報をJSON化（Three.js座標系）
+    f2_opening_data = []
+    slab_top_z_for_opening = f2_compartments[0]["slab_top_z"] if f2_compartments else 0
+    for o in f2_openings:
+        f2_opening_data.append({
+            "x_min": o["x_min"], "x_max": o["x_max"],
+            "z_min": -o["y_max"], "z_max": -o["y_min"],
+            "slab_y": slab_top_z_for_opening,
+        })
+    f2_openings_json = json.dumps(f2_opening_data, ensure_ascii=False)
+
     pitch_data_for_html = {}
     for pitch_mm, pdata in all_pitch_data.items():
         pitch_data_for_html[pitch_mm] = {
@@ -1189,7 +1385,8 @@ def main():
     html = generate_html(meshes_json, pitch_data_json, pitches_json,
                          default_pitch, colors_json, compartments_json,
                          tb_compartments_json, tb_pitch_data_json,
-                         f2_compartments_json, f2_pitch_data_json, model_name)
+                         f2_compartments_json, f2_pitch_data_json,
+                         f2_openings_json, model_name)
 
     os.makedirs(os.path.dirname(OUTPUT_HTML) or ".", exist_ok=True)
     with open(OUTPUT_HTML, 'w', encoding='utf-8') as f:
@@ -1232,7 +1429,8 @@ def main():
 def generate_html(meshes_json, pitch_data_json, pitches_json,
                   default_pitch, colors_json, compartments_json,
                   tb_compartments_json="{}", tb_pitch_data_json="{}",
-                  f2_compartments_json="{}", f2_pitch_data_json="{}", model_name=""):
+                  f2_compartments_json="{}", f2_pitch_data_json="{}",
+                  f2_openings_json="[]", model_name=""):
     return f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -1292,6 +1490,7 @@ const TB_PITCH_DATA={tb_pitch_data_json};
 const TB_COMPARTMENTS={tb_compartments_json};
 const F2_PITCH_DATA={f2_pitch_data_json};
 const F2_COMPARTMENTS={f2_compartments_json};
+const F2_OPENINGS={f2_openings_json};
 const PITCHES={pitches_json};
 const DEFAULT_PITCH={default_pitch};
 const COLORS={colors_json};
@@ -1386,15 +1585,27 @@ TB_COMPARTMENTS.forEach((c,i)=>{{
   compGroup.add(mesh);
 }});
 
-// 2F区画表示
-const F2_COMP_COLOR = 0xab47bc;  // 紫
+// 2F区画表示（区画ごとに色分け）
+const F2_COMP_COLORS = [0xce93d8, 0xba68c8, 0xab47bc, 0x9c27b0, 0x8e24aa, 0x7b1fa2];
 F2_COMPARTMENTS.forEach((c,i)=>{{
   const w=c.x_max-c.x_min, d=c.z_max-c.z_min;
   const g=new THREE.PlaneGeometry(w,Math.abs(d));
-  const mat=new THREE.MeshBasicMaterial({{color:F2_COMP_COLOR,transparent:true,opacity:0.15,side:THREE.DoubleSide}});
+  const color=F2_COMP_COLORS[i%F2_COMP_COLORS.length];
+  const mat=new THREE.MeshBasicMaterial({{color,transparent:true,opacity:0.15,side:THREE.DoubleSide}});
   const mesh=new THREE.Mesh(g,mat);
   mesh.rotation.x=-Math.PI/2;
   mesh.position.set((c.x_min+c.x_max)/2, c.slab_y+0.005, (c.z_min+c.z_max)/2);
+  compGroup.add(mesh);
+}});
+
+// 2F開口表示（赤い半透明）
+F2_OPENINGS.forEach((o,i)=>{{
+  const w=o.x_max-o.x_min, d=o.z_max-o.z_min;
+  const g=new THREE.PlaneGeometry(w,Math.abs(d));
+  const mat=new THREE.MeshBasicMaterial({{color:0xff1744,transparent:true,opacity:0.25,side:THREE.DoubleSide}});
+  const mesh=new THREE.Mesh(g,mat);
+  mesh.rotation.x=-Math.PI/2;
+  mesh.position.set((o.x_min+o.x_max)/2, o.slab_y+0.01, (o.z_min+o.z_max)/2);
   compGroup.add(mesh);
 }});
 
@@ -1474,7 +1685,8 @@ function buildNedaLines(pitchMm){{
       const cnt=f2Pd.summary.count_by_comp[String(i)]||0;
       const len=f2Pd.summary.length_by_comp[String(i)]||0;
       const c=F2_COMPARTMENTS[i];
-      const hex='#ab47bc';
+      const ccolor=F2_COMP_COLORS[i%F2_COMP_COLORS.length];
+      const hex='#'+ccolor.toString(16).padStart(6,'0');
       h+=`<span style="color:${{hex}}">■</span> 2F区画${{i+1}} (${{c.width_x.toFixed(2)}}x${{c.width_y.toFixed(2)}}m): ${{cnt}}本 / ${{len}}m<br>`;
     }}
   }}
@@ -1502,9 +1714,8 @@ function buildF2NedaLines(pitchMm){{
   while(f2NedaGroup.children.length>0) f2NedaGroup.remove(f2NedaGroup.children[0]);
   const pd=F2_PITCH_DATA[pitchMm];
   if(!pd) return;
-  const F2_JOIST_COLORS = [0xce93d8, 0xba68c8, 0xab47bc, 0x9c27b0, 0x8e24aa, 0x7b1fa2];
   pd.joists.forEach(j=>{{
-    const compColor=F2_JOIST_COLORS[j.comp_idx%F2_JOIST_COLORS.length];
+    const compColor=F2_COMP_COLORS[j.comp_idx%F2_COMP_COLORS.length];
     const color=j.reason==="区画端部"?0xea80fc:compColor;
     const s=j.seg;
     const g=new THREE.LineGeometry();
