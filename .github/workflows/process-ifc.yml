@@ -148,20 +148,16 @@ jobs:
 
       - name: Build site
         run: |
-          # 静的ページをコピー
-          cp pages/upload.html output/upload.html 2>/dev/null || true
+          # 静的ページをコピー（index.html含む全ページ）
           for f in pages/*.html; do
             [ -f "$f" ] || continue
-            FNAME=$(basename "$f")
-            [ "$FNAME" = "upload.html" ] && continue
-            cp "$f" "output/$FNAME"
+            cp "$f" "output/$(basename "$f")"
           done
 
-          # IFCモデル一覧を動的に構築
           # 旧ファイル名(mawari_*)がキャッシュに残っている場合は削除
           rm -f output/mawari_*.html 2>/dev/null || true
 
-          # モデル別summary JSONマニフェストを生成（比較ツール用）
+          # モデル別summary JSONマニフェストを生成（index/比較ツール用）
           python3 -c "
           import os, json, glob
           manifest = {'models': {}}
@@ -178,79 +174,6 @@ jobs:
               json.dump(manifest, fh, ensure_ascii=False, indent=2)
           print(f'Manifest: {len(manifest[\"models\"])} models')
           " || echo '{}' > output/manifest.json
-
-          MODEL_CARDS=""
-          for viewer in output/*.html; do
-            [ -f "$viewer" ] || continue
-            VNAME=$(basename "$viewer" .html)
-            # habaki_, gakubuchi_, upload, index, 額縁拾い等はスキップ
-            echo "$VNAME" | grep -qE '^(habaki_|gakubuchi_|gakubuchi|taruki_|neda_|upload|index)' && continue
-
-            BASENAME="$VNAME"
-            LINKS="<a href='${BASENAME}.html'>廻り縁拾い</a>"
-            if [ -f "output/habaki_${BASENAME}.html" ]; then
-              LINKS="${LINKS} | <a href='habaki_${BASENAME}.html'>巾木拾い</a>"
-            fi
-            if [ -f "output/gakubuchi_${BASENAME}.html" ]; then
-              LINKS="${LINKS} | <a href='gakubuchi_${BASENAME}.html'>額縁拾い3D</a>"
-            fi
-            if [ -f "output/taruki_${BASENAME}.html" ]; then
-              LINKS="${LINKS} | <a href='taruki_${BASENAME}.html'>垂木拾い</a>"
-            fi
-            if [ -f "output/neda_${BASENAME}.html" ]; then
-              LINKS="${LINKS} | <a href='neda_${BASENAME}.html'>根太拾い</a>"
-            fi
-            if [ -f "output/buzai_${BASENAME}.xlsx" ]; then
-              LINKS="${LINKS} | <a href='buzai_${BASENAME}.xlsx'>📊 部材一覧Excel</a>"
-            fi
-            if [ -f "output/kit_${BASENAME}.xlsx" ]; then
-              LINKS="${LINKS} | <a href='kit_${BASENAME}.xlsx'>💰 キット積算Excel</a>"
-            fi
-
-            MODEL_CARDS="${MODEL_CARDS}<div class='model-card'><h3>${BASENAME}</h3><div class='links'>${LINKS}</div></div>"
-          done
-
-          cat > output/index.html << 'HTMLEOF'
-          <!DOCTYPE html>
-          <html><head><meta charset="utf-8"><title>TALO 積算ツール</title>
-          <style>
-          body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Hiragino Sans",sans-serif;
-          background:#0d1117;color:#e6edf3;max-width:700px;margin:40px auto;padding:0 20px}
-          h1{color:#58a6ff;margin-bottom:4px}
-          .sub{color:#8b949e;margin-bottom:24px;font-size:14px}
-          .upload-btn{display:inline-block;background:#238636;color:#fff;text-decoration:none;
-          padding:10px 20px;border-radius:6px;font-size:15px;margin-bottom:8px}
-          .upload-btn:hover{background:#2ea043}
-          .tool-btn{display:inline-block;background:#1f6feb;color:#fff;text-decoration:none;
-          padding:10px 20px;border-radius:6px;font-size:15px;margin-bottom:24px;margin-left:8px}
-          .tool-btn:hover{background:#388bfd}
-          h2{font-size:16px;color:#8b949e;border-bottom:1px solid #21262d;padding-bottom:8px;margin-top:24px}
-          .model-card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin:12px 0}
-          .model-card h3{color:#58a6ff;margin-bottom:8px;font-size:18px}
-          .model-card .links{font-size:14px}
-          .model-card a{color:#58a6ff;text-decoration:none}
-          .model-card a:hover{text-decoration:underline}
-          .footer{color:#484f58;font-size:12px;margin-top:40px}
-          </style></head>
-          <body>
-          <h1>TALO 積算ツール</h1>
-          <p class="sub">IFCファイルから廻り縁拾い・巾木拾い・額縁拾い・垂木拾い・根太拾い・部材一覧Excel・キット積算Excelを自動生成</p>
-          <a href="upload.html" class="upload-btn">📤 IFCファイルをアップロード</a>
-          <a href="gakubuchi.html" class="tool-btn">🪟 額縁拾い・木取り計算</a>
-          <a href="hikaku.html" class="tool-btn">⇄ 新旧図面比較</a>
-          <h2>生成済みモデル</h2>
-          HTMLEOF
-
-          if [ -n "$MODEL_CARDS" ]; then
-            echo "$MODEL_CARDS" >> output/index.html
-          else
-            echo "<p style='color:#8b949e'>まだモデルがありません。IFCファイルをアップロードしてください。</p>" >> output/index.html
-          fi
-
-          cat >> output/index.html << 'HTMLEOF'
-          <p class="footer">TALO International Inc. — Powered by GitHub Actions</p>
-          </body></html>
-          HTMLEOF
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
