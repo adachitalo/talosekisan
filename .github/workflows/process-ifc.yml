@@ -162,31 +162,22 @@ jobs:
           rm -f output/mawari_*.html 2>/dev/null || true
 
           # モデル別summary JSONマニフェストを生成（比較ツール用）
-          echo '{"models":{' > output/manifest.json
-          FIRST_MODEL=true
-          for sumjson in output/*_summary.json; do
-            [ -f "$sumjson" ] || continue
-            SJNAME=$(basename "$sumjson")
-            # モデル名とツール名を抽出
-            echo "$SJNAME" >> /tmp/manifest_files.txt
-          done
-          # モデル名ごとにグループ化
           python3 -c "
-import os, json, glob
-manifest = {'models': {}}
-for f in sorted(glob.glob('output/*_summary.json')):
-    bn = os.path.basename(f)
-    with open(f) as fh:
-        data = json.load(fh)
-    model = data.get('model', bn.replace('_summary.json',''))
-    tool = data.get('tool', '')
-    if model not in manifest['models']:
-        manifest['models'][model] = {'files': {}}
-    manifest['models'][model]['files'][tool] = bn
-with open('output/manifest.json', 'w') as fh:
-    json.dump(manifest, fh, ensure_ascii=False, indent=2)
-print(f'Manifest: {len(manifest[\"models\"])} models')
-" || echo '{}' > output/manifest.json
+          import os, json, glob
+          manifest = {'models': {}}
+          for f in sorted(glob.glob('output/*_summary.json')):
+              bn = os.path.basename(f)
+              with open(f) as fh:
+                  data = json.load(fh)
+              model = data.get('model', bn.replace('_summary.json',''))
+              tool = data.get('tool', '')
+              if model not in manifest['models']:
+                  manifest['models'][model] = {'files': {}}
+              manifest['models'][model]['files'][tool] = bn
+          with open('output/manifest.json', 'w') as fh:
+              json.dump(manifest, fh, ensure_ascii=False, indent=2)
+          print(f'Manifest: {len(manifest[\"models\"])} models')
+          " || echo '{}' > output/manifest.json
 
           MODEL_CARDS=""
           for viewer in output/*.html; do
