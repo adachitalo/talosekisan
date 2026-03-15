@@ -723,6 +723,9 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 {dim_warn_html}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineGeometry.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineMaterial.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/Line2.js"></script>
 <script>
 const MESHES={meshes_json};
 const FRAMES={frames_json};
@@ -801,11 +804,11 @@ const kindOrder=["額縁","額縁受け","T-bar","霧除け","木口"];
 kindOrder.forEach(k=>{{frameGroups[k]=new THREE.Group();scene.add(frameGroups[k]);}});
 FRAMES.forEach(f=>{{
   const color=FRAME_COLORS[f.kind]||0xffffff;
-  const g=new THREE.BufferGeometry();
   const pts=f.points;
-  g.setAttribute('position',new THREE.Float32BufferAttribute([pts[0][0],pts[0][1],pts[0][2],pts[1][0],pts[1][1],pts[1][2]],3));
-  const mat=new THREE.LineBasicMaterial({{color,linewidth:3}});
-  const line=new THREE.LineSegments(g,mat);
+  const g=new THREE.LineGeometry();
+  g.setPositions([pts[0][0],pts[0][1],pts[0][2],pts[1][0],pts[1][1],pts[1][2]]);
+  const mat=new THREE.LineMaterial({{color,linewidth:4,resolution:new THREE.Vector2(innerWidth,innerHeight)}});
+  const line=new THREE.Line2(g,mat);
   line.userData={{kind:f.kind,length:f.length,fixture:f.fixture}};
   if(frameGroups[f.kind])frameGroups[f.kind].add(line);
 }});
@@ -894,7 +897,7 @@ renderer.domElement.addEventListener('mousemove',e=>{{
 }});
 
 (function anim(){{requestAnimationFrame(anim);renderer.render(scene,camera);}})();
-addEventListener('resize',()=>{{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);}});
+addEventListener('resize',()=>{{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);scene.traverse(c=>{{if(c.material&&c.material.resolution)c.material.resolution.set(innerWidth,innerHeight);}});}});
 </script>
 </body>
 </html>'''
