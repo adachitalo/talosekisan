@@ -48,7 +48,7 @@ FRAME_RULES = {
     "NW":   {"front_frame": "4", "back_frame": "3",
              "front_extras": ["T-bar", "木口"]},
     "JD":   {"front_frame": "3", "back_frame": "3",
-             "front_extras": ["木口"]},
+             "front_extras": ["木口", "T-bar", "額縁受け"]},
     "SL":   {"front_frame": "4", "back_frame": None,
              "front_extras": []},
 }
@@ -158,6 +158,8 @@ PARTITION_FRAME_RULES = {
             "front_extras": []},
     "NW":  {"front_frame": "3", "back_frame": "3",
             "front_extras": ["木口"]},
+    "JD":  {"front_frame": "3", "back_frame": "3",
+            "front_extras": ["木口"]},  # 間仕切りJDはT-bar/額縁受け不要
 }
 
 
@@ -209,9 +211,12 @@ def classify_fixture_type(name: str, typedef: str) -> str:
     # LogsOpeningDoor: ログ壁大開口（建具なし）
     if "LOGSOPENINGDOOR" in td or "LOGS_OPENING" in td:
         return None
-    # open_ad: 開放部（建具リーフなし）
+    # open_ad: 開放部（建具リーフなし）— ただしSD*（実ドア）は除外しない
     if td == "OPEN_AD" or (nm.startswith("OPEN") and "DOOR" not in td):
-        return None
+        if nm.startswith("SD"):
+            return "JD"  # SD8等の実ドアはJD（木口あり）
+        else:
+            return None
 
     # --- 天窓(スカイライト) ---
     if "スカイライト" in typedef or "SKYLIGHT" in td or nm.startswith("SL"):
@@ -278,12 +283,19 @@ def get_frame_dimensions(ftype: str, ifc_w: float, ifc_h: float, wall_type: str 
 # ============================================================================
 # 額縁部材の長さ計算（mm単位）
 # ============================================================================
-def generate_frame_pieces(ftype: str, w_mm: float, h_mm: float, wall_type: str = "log"):
+def generate_frame_pieces(ftype: str, w_mm: float, h_mm: float, wall_type: str = "log",
+                          ifc_w: float = None, ifc_h: float = None):
     """
     額縁タイプと開口寸法(mm)から、部材リスト(kind, piece_name, length_mm, side)を返す。
     side: "front" or "back"
     wall_type: "log" (ログ壁) or "partition" (間仕切り壁) — 間仕切りは簡素化
+    ifc_w, ifc_h: IFC原寸法(mm)。T-bar等はオフセット前の開口寸法を使用。
     """
+    # T-bar/木口はIFC開口寸法（オフセット前）を使用
+    if ifc_w is None:
+        ifc_w = w_mm
+    if ifc_h is None:
+        ifc_h = h_mm
     # 間仕切り壁で専用ルールがある場合はそちらを使用
     if wall_type == "partition" and ftype in PARTITION_FRAME_RULES:
         rule = PARTITION_FRAME_RULES[ftype]
@@ -292,41 +304,42 @@ def generate_frame_pieces(ftype: str, w_mm: float, h_mm: float, wall_type: str =
     pieces = []
 
     # --- 表面(front) ---
+    # 3Dビューア用: すべてIFC寸法(ifc_w/ifc_h)ベースで統一
     if rule["front_frame"] == "4":
-        pieces.append(("額縁", "上", w_mm + 300, "front"))
-        pieces.append(("額縁", "左", h_mm + 170, "front"))
-        pieces.append(("額縁", "右", h_mm + 170, "front"))
-        pieces.append(("額縁", "下", w_mm, "front"))
+        pieces.append(("額縁", "上", ifc_w + 340, "front"))
+        pieces.append(("額縁", "左", ifc_h + 170, "front"))
+        pieces.append(("額縁", "右", ifc_h + 170, "front"))
+        pieces.append(("額縁", "下", ifc_w, "front"))
     else:
-        pieces.append(("額縁", "上", w_mm + 300, "front"))
-        pieces.append(("額縁", "左", h_mm + 170, "front"))
-        pieces.append(("額縁", "右", h_mm + 170, "front"))
+        pieces.append(("額縁", "上", ifc_w + 340, "front"))
+        pieces.append(("額縁", "左", ifc_h + 170, "front"))
+        pieces.append(("額縁", "右", ifc_h + 170, "front"))
 
     for extra in rule["front_extras"]:
         if extra == "額縁受け":
-            pieces.append(("額縁受け", "横", w_mm, "front"))
+            pieces.append(("額縁受け", "横", ifc_w, "front"))
         elif extra == "T-bar":
-            pieces.append(("T-bar", "縦1", h_mm, "front"))
-            pieces.append(("T-bar", "縦2", h_mm, "front"))
+            pieces.append(("T-bar", "縦1", ifc_h, "front"))
+            pieces.append(("T-bar", "縦2", ifc_h, "front"))
         elif extra == "霧除け":
-            pieces.append(("霧除け", "横", w_mm + 300, "front"))
+            pieces.append(("霧除け", "横", ifc_w + 340, "front"))
         elif extra == "木口":
-            pieces.append(("木口", "上", w_mm, "front"))
-            pieces.append(("木口", "左", h_mm, "front"))
-            pieces.append(("木口", "右", h_mm, "front"))
+            pieces.append(("木口", "上", ifc_w, "front"))
+            pieces.append(("木口", "左", ifc_h, "front"))
+            pieces.append(("木口", "右", ifc_h, "front"))
 
     # --- 裏面(back) ---
     if rule["back_frame"] is None:
         pass  # 天窓等: 片面のみ
     elif rule["back_frame"] == "4":
-        pieces.append(("額縁", "上", w_mm + 300, "back"))
-        pieces.append(("額縁", "左", h_mm + 170, "back"))
-        pieces.append(("額縁", "右", h_mm + 170, "back"))
-        pieces.append(("額縁", "下", w_mm, "back"))
+        pieces.append(("額縁", "上", ifc_w + 340, "back"))
+        pieces.append(("額縁", "左", ifc_h + 170, "back"))
+        pieces.append(("額縁", "右", ifc_h + 170, "back"))
+        pieces.append(("額縁", "下", ifc_w, "back"))
     else:
-        pieces.append(("額縁", "上", w_mm + 300, "back"))
-        pieces.append(("額縁", "左", h_mm + 170, "back"))
-        pieces.append(("額縁", "右", h_mm + 170, "back"))
+        pieces.append(("額縁", "上", ifc_w + 340, "back"))
+        pieces.append(("額縁", "左", ifc_h + 170, "back"))
+        pieces.append(("額縁", "右", ifc_h + 170, "back"))
 
     return pieces
 
@@ -405,26 +418,12 @@ def extract_meshes(ifc_file):
 # IFC解析 – 建具検出と額縁ライン生成
 # ============================================================================
 def get_skylight_placement(element):
-    """天窓のワールド座標中心と勾配に沿った方向ベクトルを取得。
-    IFC配置行列のheight_dirは垂直[0,0,1]で勾配を反映しないため、
-    メッシュ頂点から実際の勾配方向を算出する。
-    Returns: (center, width_dir, height_dir, depth_dir) すべてIFC座標系
+    """天窓の配置原点と方向ベクトルを取得。
+    天窓はIfcRoof上に配置されるため、IFC配置行列の原点がフロアレベルにある。
+    ワールド座標メッシュから実際の位置・勾配を算出する。
+    Returns: (origin, width_dir, height_dir, depth_dir) すべてIFC座標系
     """
-    settings_w = ifcopenshell.geom.settings()
-    settings_w.set(settings_w.USE_WORLD_COORDS, True)
-    shape_w = ifcopenshell.geom.create_shape(settings_w, element)
-    vf = shape_w.geometry.verts
-
-    pts = np.array([[vf[i], vf[i+1], vf[i+2]]
-                     for i in range(0, len(vf), 3)])
-
-    center = np.array([
-        (pts[:, 0].min() + pts[:, 0].max()) / 2,
-        (pts[:, 1].min() + pts[:, 1].max()) / 2,
-        (pts[:, 2].min() + pts[:, 2].max()) / 2
-    ])
-
-    # 配置行列からwidth_dir（幅方向=Y軸方向、正しい）を取得
+    # 配置行列からwidth_dirを取得（幅方向は棟と平行で正しい）
     settings_l = ifcopenshell.geom.settings()
     settings_l.set(settings_l.USE_WORLD_COORDS, False)
     shape_l = ifcopenshell.geom.create_shape(settings_l, element)
@@ -433,73 +432,69 @@ def get_skylight_placement(element):
     width_dir = m44[:3, 0]
     width_dir = width_dir / (np.linalg.norm(width_dir) + 1e-12)
 
-    # 勾配方向(height_dir): メッシュのバウンディングボックス対角線から算出
-    # width方向成分を除去し、残りのXZ平面で勾配方向を求める
-    proj = pts - center
-    w_comp = np.dot(proj, width_dir).reshape(-1, 1) * width_dir
-    perp = proj - w_comp
+    # ワールド座標メッシュから実際の位置を取得
+    settings_w = ifcopenshell.geom.settings()
+    settings_w.set(settings_w.USE_WORLD_COORDS, True)
+    shape_w = ifcopenshell.geom.create_shape(settings_w, element)
+    vf = shape_w.geometry.verts
+    pts = np.array([[vf[i], vf[i+1], vf[i+2]]
+                     for i in range(0, len(vf), 3)])
 
-    # XZ平面のバウンディングボックス対角線 = 勾配方向
-    x_min, x_max = perp[:, 0].min(), perp[:, 0].max()
-    z_min, z_max = perp[:, 2].min(), perp[:, 2].max()
-    # 下端中心から上端中心への方向ベクトル
-    # (低Z側→高Z側, 対応するX方向も考慮)
-    low_z_mask = perp[:, 2] < (z_min + (z_max - z_min) * 0.2)
-    high_z_mask = perp[:, 2] > (z_max - (z_max - z_min) * 0.2)
-    low_center = perp[low_z_mask].mean(axis=0) if low_z_mask.any() else np.array([x_min, 0, z_min])
-    high_center = perp[high_z_mask].mean(axis=0) if high_z_mask.any() else np.array([x_max, 0, z_max])
-    slope_vec = high_center - low_center
-    slope_norm = np.linalg.norm(slope_vec)
-    if slope_norm > 1e-6:
-        height_dir = slope_vec / slope_norm
-    else:
-        height_dir = np.array([0, 0, 1])
+    bb_center = pts.mean(axis=0)
+
+    # 勾配方向(height_dir): width方向を除去し、残りの最大分散方向
+    rel = pts - bb_center
+    w_proj = np.dot(rel, width_dir).reshape(-1, 1) * width_dir
+    perp = rel - w_proj
+
+    cov = np.cov(perp.T)
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    height_dir = eigvecs[:, np.argmax(eigvals)]
     # Z成分が正（上向き勾配）になるよう統一
     if height_dir[2] < 0:
         height_dir = -height_dir
+    height_dir = height_dir / (np.linalg.norm(height_dir) + 1e-12)
 
     # depth_dir: width × height の外積（屋根面の法線方向）
     depth_dir = np.cross(width_dir, height_dir)
     depth_dir = depth_dir / (np.linalg.norm(depth_dir) + 1e-12)
 
-    return center, width_dir, height_dir, depth_dir
+    # 基点 = BBの左下手前（width最小, height最小, depth最小）
+    proj_w = np.dot(rel, width_dir)
+    proj_h = np.dot(rel, height_dir)
+    proj_d = np.dot(rel, depth_dir)
+
+    origin = (bb_center
+              + proj_w.min() * width_dir
+              + proj_h.min() * height_dir
+              + proj_d.min() * depth_dir)
+
+    return origin, width_dir, height_dir, depth_dir
 
 
 def get_element_placement_and_center(element):
-    """建具のワールド座標中心と方向ベクトルを取得。
-    Returns: (center, width_dir, height_dir, depth_dir) すべてIFC座標系
+    """建具のIFC配置原点と方向ベクトルを取得。
+    基点 = IFC配置行列のtranslation（建具の配置原点）。
+    Returns: (origin, width_dir, height_dir, depth_dir) すべてIFC座標系
     """
-    settings_world = ifcopenshell.geom.settings()
-    settings_world.set(settings_world.USE_WORLD_COORDS, True)
     settings_local = ifcopenshell.geom.settings()
     settings_local.set(settings_local.USE_WORLD_COORDS, False)
 
-    # ワールド座標メッシュからバウンディングボックス中心を取得
-    shape_w = ifcopenshell.geom.create_shape(settings_world, element)
-    vf = shape_w.geometry.verts
-    xs = [vf[i] for i in range(0, len(vf), 3)]
-    ys = [vf[i + 1] for i in range(0, len(vf), 3)]
-    zs = [vf[i + 2] for i in range(0, len(vf), 3)]
-    center = np.array([
-        (min(xs) + max(xs)) / 2,
-        (min(ys) + max(ys)) / 2,
-        (min(zs) + max(zs)) / 2
-    ])
-
-    # ローカル座標の変換行列から方向ベクトルを取得
+    # ローカル→ワールド変換行列から方向ベクトルと配置原点を取得
     shape_l = ifcopenshell.geom.create_shape(settings_local, element)
     mat = list(shape_l.transformation.matrix)
     m44 = np.array(mat).reshape(4, 4).T
-    # IFC建具配置: x_dir=幅方向, y_dir=奥行き方向, z_dir=高さ方向
+    # IFC建具配置: col0=幅方向, col1=奥行き方向, col2=高さ方向, col3=配置原点
     width_dir = m44[:3, 0]
     depth_dir = m44[:3, 1]
     height_dir = m44[:3, 2]
+    origin = m44[:3, 3]  # IFC配置原点（ワールド座標）
 
     width_dir = width_dir / (np.linalg.norm(width_dir) + 1e-12)
     height_dir = height_dir / (np.linalg.norm(height_dir) + 1e-12)
     depth_dir = depth_dir / (np.linalg.norm(depth_dir) + 1e-12)
 
-    return center, width_dir, height_dir, depth_dir
+    return origin, width_dir, height_dir, depth_dir
 
 
 def get_typedef_name(ifc_file, element):
@@ -562,20 +557,47 @@ def detect_fixtures_and_frames(ifc_file):
                 "dim_error": dim_error,
             })
 
-            pieces = generate_frame_pieces(ftype, frame_w, frame_h, wall_type)
+            pieces = generate_frame_pieces(ftype, frame_w, frame_h, wall_type,
+                                          ifc_w=ifc_w, ifc_h=ifc_h)
 
-            # depth_dir = 壁面の法線方向（表/裏オフセット）
-            front_offset = depth_dir * 0.015
-            back_offset = -depth_dir * 0.015
+            # depth_dir = 壁面の法線方向（表面から外部に向かう方向）
+            # 額縁の裏表間隔 = 120mm
+            # origin=左下手前、depth_dir=手前→奥方向
+            # FRAME_RULES: front(表)=外壁面、back(裏)=室内面
+            front_offset = depth_dir * 0.12    # 表面（外壁側、120mm奥）
+            back_offset = depth_dir * 0.0      # 裏面（室内側、原点側）
+
+            # デバッグ用: 基点を球体で表示
+            o = center  # origin = 左下手前
+            all_frames.append({
+                "kind": "基点",
+                "points": [
+                    [round(o[0], 3), round(o[2], 3), round(-o[1], 3)],
+                    [round(o[0], 3), round(o[2], 3), round(-o[1], 3)]
+                ],
+                "length": 0,
+                "fixture": label,
+                "debug_origin": True,
+                "dirs": {
+                    "width": [round(width_dir[0], 3), round(width_dir[2], 3), round(-width_dir[1], 3)],
+                    "height": [round(height_dir[0], 3), round(height_dir[2], 3), round(-height_dir[1], 3)],
+                    "depth": [round(depth_dir[0], 3), round(depth_dir[2], 3), round(-depth_dir[1], 3)],
+                },
+            })
 
             for kind, piece_name, length_mm, side in pieces:
-                offset = front_offset if side == "front" else back_offset
+                # 額縁は裏表(front/back)で位置が分かれる
+                # T-bar/木口/額縁受け/霧除けはKIND_DEPTHで絶対位置指定（side_offset=0）
+                if kind == "額縁":
+                    side_offset = front_offset if side == "front" else back_offset
+                else:
+                    side_offset = depth_dir * 0.0  # KIND_DEPTHが絶対位置を指定
 
-                # center=メッシュ中心, width_dir=幅方向, height_dir=高さ方向
+                # center=左下手前, width_dir=幅方向, height_dir=高さ方向
                 p1, p2 = compute_frame_line_3d(
                     kind, piece_name,
-                    center, width_dir, height_dir,
-                    w_m, h_m, offset
+                    center, width_dir, height_dir, depth_dir,
+                    w_m, h_m, length_mm, side_offset
                 )
 
                 # IFC(Z-up) → Three.js(Y-up): (x,y,z)→(x,z,-y)
@@ -592,39 +614,94 @@ def detect_fixtures_and_frames(ifc_file):
     return fixtures_info, all_frames
 
 
-def compute_frame_line_3d(kind, piece_name, origin, x_dir, y_dir, w_m, h_m, offset):
-    """額縁部材の3Dライン座標を計算"""
-    hw = w_m / 2
-    hh = h_m / 2
-    base = origin + offset
+def compute_frame_line_3d(kind, piece_name, origin, x_dir, y_dir, depth_dir,
+                          w_m, h_m, length_mm, side_offset):
+    """額縁部材の3Dライン座標を計算（実寸法 + 部材別オフセット）
 
-    if piece_name in ("上", "横") and kind not in ("木口",):
-        p1 = base + (-hw) * x_dir + hh * y_dir
-        p2 = base + hw * x_dir + hh * y_dir
-    elif piece_name == "下":
-        p1 = base + (-hw) * x_dir + (-hh) * y_dir
-        p2 = base + hw * x_dir + (-hh) * y_dir
-    elif piece_name in ("左", "縦1"):
-        p1 = base + (-hw) * x_dir + (-hh) * y_dir
-        p2 = base + (-hw) * x_dir + hh * y_dir
-    elif piece_name in ("右", "縦2"):
-        p1 = base + hw * x_dir + (-hh) * y_dir
-        p2 = base + hw * x_dir + hh * y_dir
-    elif kind == "木口" and piece_name == "上":
-        p1 = base + (-hw) * x_dir + hh * y_dir
-        p2 = base + hw * x_dir + hh * y_dir
-    elif kind == "木口" and piece_name == "左":
-        p1 = base + (-hw) * x_dir + (-hh) * y_dir
-        p2 = base + (-hw) * x_dir + hh * y_dir
-    elif kind == "木口" and piece_name == "右":
-        p1 = base + hw * x_dir + (-hh) * y_dir
-        p2 = base + hw * x_dir + hh * y_dir
-    elif kind == "額縁受け":
-        p1 = base + (-hw) * x_dir + hh * y_dir
-        p2 = base + hw * x_dir + hh * y_dir
+    すべてIFC寸法ベースで統一。各部材を実際の長さで描画し、
+    部材種別に応じて壁面内で位置をずらす。
+
+    Args:
+        kind: 部材種別（"額縁","霧除け","木口","T-bar","額縁受け"）
+        piece_name: パート名（"上","下","左","右","横","縦1","縦2"）
+        origin: 建具中心座標 (IFC座標系)
+        x_dir: 幅方向ベクトル
+        y_dir: 高さ方向ベクトル
+        depth_dir: 壁面法線方向ベクトル（表面から外部に向かう方向）
+        w_m: 開口幅 (m, IFC寸法)
+        h_m: 開口高さ (m, IFC寸法)
+        length_mm: 部材の実長さ (mm)
+        side_offset: 表裏オフセットベクトル（front/backの位置ずれ）
+    """
+    # すべてIFC寸法ベースで統一
+    # origin = 建具の左下手前 → (0,0) = 左下、+x_dir = 右、+y_dir = 上
+    W = w_m     # IFC開口幅 (m)
+    H = h_m     # IFC開口高さ (m)
+    L = length_mm / 1000.0  # 部材実長 (m)
+
+    # --- 部材種別ごとのdepth方向オフセット ---
+    # 額縁: side_offsetで裏表が決まる(front=0.12外壁, back=0.0室内)
+    # その他: side_offset=0、KIND_DEPTHが絶対位置
+    KIND_DEPTH = {
+        "額縁":     0.0,      # side_offsetで裏表が決まる
+        "霧除け":   0.14,     # 外壁面(0.12)のさらに外側
+        "木口":     0.04,     # 裏表の中心寄り（室内側）
+        "T-bar":    0.06,     # 裏表の中心
+        "額縁受け": 0.08,     # 裏表の中心寄り（外壁側）
+    }
+    KIND_Y_SHIFT = {
+        "額縁受け": 0.03,   # 上部に30mm
+    }
+
+    d_off = KIND_DEPTH.get(kind, 0.0)
+    y_shift = KIND_Y_SHIFT.get(kind, 0.0)
+    base = origin + side_offset + depth_dir * d_off + y_dir * y_shift
+
+    # --- 左下基点: origin=(左,下) → 右方向=+x_dir, 上方向=+y_dir ---
+    cx = W / 2   # 開口幅の中心(左端からの距離)
+    cy = H / 2   # 開口高さの中心(下端からの距離)
+
+    if kind == "額縁" and piece_name == "上":
+        p1 = base + (cx - L/2) * x_dir + H * y_dir
+        p2 = base + (cx + L/2) * x_dir + H * y_dir
+    elif kind == "額縁" and piece_name == "下":
+        p1 = base + (cx - L/2) * x_dir
+        p2 = base + (cx + L/2) * x_dir
+    elif kind == "額縁" and piece_name == "左":
+        # 上端=H固定、下にL分伸びる
+        p1 = base + (H - L) * y_dir
+        p2 = base + H * y_dir
+    elif kind == "額縁" and piece_name == "右":
+        p1 = base + W * x_dir + (H - L) * y_dir
+        p2 = base + W * x_dir + H * y_dir
+
     elif kind == "霧除け":
-        p1 = base + (-hw) * x_dir + hh * y_dir
-        p2 = base + hw * x_dir + hh * y_dir
+        p1 = base + (cx - L/2) * x_dir + H * y_dir
+        p2 = base + (cx + L/2) * x_dir + H * y_dir
+
+    elif kind == "額縁受け":
+        p1 = base + (cx - L/2) * x_dir + H * y_dir
+        p2 = base + (cx + L/2) * x_dir + H * y_dir
+
+    elif kind == "T-bar" and piece_name == "縦1":
+        # T-bar左: 左端(x=0)位置
+        p1 = base + (cy - L/2) * y_dir
+        p2 = base + (cy + L/2) * y_dir
+    elif kind == "T-bar" and piece_name == "縦2":
+        # T-bar右: 右端(x=W)位置
+        p1 = base + W * x_dir + (cy - L/2) * y_dir
+        p2 = base + W * x_dir + (cy + L/2) * y_dir
+
+    elif kind == "木口" and piece_name == "上":
+        p1 = base + (cx - L/2) * x_dir + H * y_dir
+        p2 = base + (cx + L/2) * x_dir + H * y_dir
+    elif kind == "木口" and piece_name == "左":
+        p1 = base + (cy - L/2) * y_dir
+        p2 = base + (cy + L/2) * y_dir
+    elif kind == "木口" and piece_name == "右":
+        p1 = base + W * x_dir + (cy - L/2) * y_dir
+        p2 = base + W * x_dir + (cy + L/2) * y_dir
+
     else:
         p1 = base
         p2 = base + x_dir * 0.1
@@ -804,7 +881,33 @@ Object.keys(HIDDEN_CATS).forEach(c=>{{if(catGroups[c])catGroups[c].visible=false
 const frameGroups={{}};
 const kindOrder=["額縁","額縁受け","T-bar","霧除け","木口"];
 kindOrder.forEach(k=>{{frameGroups[k]=new THREE.Group();scene.add(frameGroups[k]);}});
+const debugGroup=new THREE.Group();scene.add(debugGroup);
 FRAMES.forEach(f=>{{
+  // デバッグ: 基点球体と方向矢印
+  if(f.debug_origin){{
+    const p=f.points[0];
+    // 赤い球体（基点）
+    const sg=new THREE.SphereGeometry(0.03,8,8);
+    const sm=new THREE.MeshBasicMaterial({{color:0xff0000}});
+    const sphere=new THREE.Mesh(sg,sm);
+    sphere.position.set(p[0],p[1],p[2]);
+    debugGroup.add(sphere);
+    // 方向矢印: width=赤, height=緑, depth=青（各0.2m）
+    if(f.dirs){{
+      const len=0.2;
+      const dirs=[['width',0xff0000],['height',0x00ff00],['depth',0x0000ff]];
+      dirs.forEach(([k,c])=>{{
+        const d=f.dirs[k];
+        const ag=new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(p[0],p[1],p[2]),
+          new THREE.Vector3(p[0]+d[0]*len,p[1]+d[1]*len,p[2]+d[2]*len)
+        ]);
+        const am=new THREE.LineBasicMaterial({{color:c,linewidth:2}});
+        debugGroup.add(new THREE.Line(ag,am));
+      }});
+    }}
+    return;
+  }}
   const color=FRAME_COLORS[f.kind]||0xffffff;
   const pts=f.points;
   const g=new THREE.LineGeometry();
@@ -943,6 +1046,8 @@ def main():
 
     type_totals = defaultdict(float)
     for f in frames:
+        if f.get("debug_origin"):
+            continue
         type_totals[f["kind"]] += f["length"] / 1000.0
     type_totals = {k: round(v, 2) for k, v in type_totals.items()}
 
@@ -991,6 +1096,7 @@ def main():
                 "length_mm": f["length"],
             }
             for f in frames
+            if not f.get("debug_origin")
         ],
     }
     with open(json_path, 'w', encoding='utf-8') as f_json:
