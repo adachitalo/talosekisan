@@ -759,6 +759,11 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineSegmentsGeometry.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineGeometry.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineMaterial.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineSegments2.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/Line2.js"></script>
 <script>
 const MESHES={meshes_json};
 const PITCH_DATA={pitch_data_json};
@@ -836,10 +841,11 @@ function buildTarukiLines(pitchMm){{
   if(!pd) return;
   pd.rafters.forEach(r=>{{
     const color=REASON_COLORS[r.reason]||0xffa500;
-    const pts=[new THREE.Vector3(...r.seg[0]),new THREE.Vector3(...r.seg[1])];
-    const g=new THREE.BufferGeometry().setFromPoints(pts);
-    const mat=new THREE.LineBasicMaterial({{color,linewidth:2}});
-    const line=new THREE.Line(g,mat);
+    const s=r.seg;
+    const g=new THREE.LineGeometry();
+    g.setPositions([s[0][0],s[0][1],s[0][2],s[1][0],s[1][1],s[1][2]]);
+    const mat=new THREE.LineMaterial({{color,linewidth:4,resolution:new THREE.Vector2(innerWidth,innerHeight)}});
+    const line=new THREE.Line2(g,mat);
     line.userData={{reason:r.reason,length:r.length_m,side:r.side,double:r.double}};
     tarukiGroup.add(line);
   }});
@@ -916,7 +922,7 @@ function toggleBuilding(){{showB=!showB;buildingGroup.visible=showB;document.get
 
 const grid=new THREE.GridHelper(20,40,0x444444,0x333333);grid.position.copy(center);grid.position.y=0;scene.add(grid);
 (function anim(){{requestAnimationFrame(anim);renderer.render(scene,camera);}})();
-addEventListener('resize',()=>{{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);}});
+addEventListener('resize',()=>{{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);scene.traverse(c=>{{if(c.material&&c.material.resolution)c.material.resolution.set(innerWidth,innerHeight);}});}});
 </script>
 </body>
 </html>"""

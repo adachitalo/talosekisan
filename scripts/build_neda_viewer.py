@@ -623,6 +623,11 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineSegmentsGeometry.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineGeometry.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineMaterial.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineSegments2.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/Line2.js"></script>
 <script>
 const MESHES={meshes_json};
 const PITCH_DATA={pitch_data_json};
@@ -712,9 +717,10 @@ COMPARTMENTS.forEach((c,i)=>{{
     new THREE.Vector3(c.x_min, slabY+0.01, c.z_max),
     new THREE.Vector3(c.x_min, slabY+0.01, c.z_min),
   ];
-  const lg=new THREE.BufferGeometry().setFromPoints(pts);
-  const lmat=new THREE.LineBasicMaterial({{color,linewidth:2}});
-  compGroup.add(new THREE.Line(lg,lmat));
+  const posArr=[];pts.forEach(p=>posArr.push(p.x,p.y,p.z));
+  const lg=new THREE.LineGeometry();lg.setPositions(posArr);
+  const lmat=new THREE.LineMaterial({{color,linewidth:4,resolution:new THREE.Vector2(innerWidth,innerHeight)}});
+  compGroup.add(new THREE.Line2(lg,lmat));
 }});
 
 // 根太ライン描画
@@ -728,10 +734,11 @@ function buildNedaLines(pitchMm){{
   pd.joists.forEach(j=>{{
     const compColor=COMP_COLORS[j.comp_idx%COMP_COLORS.length];
     const color=j.reason==="区画端部"?0x00e676:compColor;
-    const pts=[new THREE.Vector3(...j.seg[0]),new THREE.Vector3(...j.seg[1])];
-    const g=new THREE.BufferGeometry().setFromPoints(pts);
-    const mat=new THREE.LineBasicMaterial({{color,linewidth:2}});
-    const line=new THREE.Line(g,mat);
+    const s=j.seg;
+    const g=new THREE.LineGeometry();
+    g.setPositions([s[0][0],s[0][1],s[0][2],s[1][0],s[1][1],s[1][2]]);
+    const mat=new THREE.LineMaterial({{color,linewidth:4,resolution:new THREE.Vector2(innerWidth,innerHeight)}});
+    const line=new THREE.Line2(g,mat);
     line.userData={{reason:j.reason,length:j.length_m,comp_idx:j.comp_idx}};
     nedaGroup.add(line);
   }});
@@ -813,7 +820,7 @@ function toggleBuilding(){{showB=!showB;buildingGroup.visible=showB;document.get
 
 const grid=new THREE.GridHelper(20,40,0x444444,0x333333);grid.position.copy(center);grid.position.y=0;scene.add(grid);
 (function anim(){{requestAnimationFrame(anim);renderer.render(scene,camera);}})();
-addEventListener('resize',()=>{{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);}});
+addEventListener('resize',()=>{{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);scene.traverse(c=>{{if(c.material&&c.material.resolution)c.material.resolution.set(innerWidth,innerHeight);}});}});
 </script>
 </body>
 </html>"""
