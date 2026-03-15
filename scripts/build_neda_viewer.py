@@ -444,7 +444,7 @@ def detect_2f_compartments(ifc, settings):
 
     if not slab_2f_list:
         print("  2Fスラブなし（平屋）")
-        return [], "", []
+        return [], ""
 
     # 全2Fスラブの統合BB（通常は1つだが複数ある場合も対応）
     all_x_min = min(s["x_min"] for s in slab_2f_list)
@@ -1457,6 +1457,12 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 #controls button.active {{ background:rgba(79,195,247,0.5); border-color:#4fc3f7; }}
 #pitch-group {{ display:flex; gap:2px; margin-right:8px; }}
 #pitch-group button {{ padding:8px 12px; }}
+.comp-label {{
+  color:#fff; font-size:12px; font-weight:bold; padding:3px 8px;
+  border-radius:4px; white-space:nowrap; pointer-events:none;
+  text-shadow:0 0 3px rgba(0,0,0,0.8);
+  font-family:Arial,sans-serif; line-height:1.3; text-align:center;
+}}
 </style>
 </head>
 <body>
@@ -1483,6 +1489,7 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineMaterial.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/LineSegments2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lines/Line2.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/renderers/CSS2DRenderer.js"></script>
 <script>
 const MESHES={meshes_json};
 const PITCH_DATA={pitch_data_json};
@@ -1514,6 +1521,13 @@ const camera=new THREE.PerspectiveCamera(50,W/H,0.01,1000);
 const renderer=new THREE.WebGLRenderer({{antialias:true}});
 renderer.setSize(W,H); renderer.setPixelRatio(devicePixelRatio);
 document.body.appendChild(renderer.domElement);
+
+const labelRenderer=new THREE.CSS2DRenderer();
+labelRenderer.setSize(W,H);
+labelRenderer.domElement.style.position='absolute';
+labelRenderer.domElement.style.top='0px';
+labelRenderer.domElement.style.pointerEvents='none';
+document.body.appendChild(labelRenderer.domElement);
 
 scene.add(new THREE.AmbientLight(0xffffff,0.5));
 const dl=new THREE.DirectionalLight(0xffffff,0.7); dl.position.set(5,10,5); scene.add(dl);
@@ -1569,7 +1583,14 @@ COMPARTMENTS.forEach((c,i)=>{{
   mesh.rotation.x=-Math.PI/2;
   mesh.position.set((c.x_min+c.x_max)/2, slabY+0.005, (c.z_min+c.z_max)/2);
   compGroup.add(mesh);
-  // 区画枠線（太線は不要なので削除済み — 半透明面のみ表示）
+  // ラベル
+  const hex='#'+color.toString(16).padStart(6,'0');
+  const lDiv=document.createElement('div');lDiv.className='comp-label';
+  lDiv.style.background='rgba(0,0,0,0.6)';lDiv.style.borderLeft='3px solid '+hex;
+  lDiv.innerHTML='1F-区画'+(i+1)+'<br>'+w.toFixed(2)+'×'+Math.abs(d).toFixed(2)+'m';
+  const lObj=new THREE.CSS2DObject(lDiv);
+  lObj.position.set((c.x_min+c.x_max)/2, slabY+0.05, (c.z_min+c.z_max)/2);
+  compGroup.add(lObj);
 }});
 
 // テラス・バルコニー区画表示
@@ -1583,6 +1604,14 @@ TB_COMPARTMENTS.forEach((c,i)=>{{
   mesh.rotation.x=-Math.PI/2;
   mesh.position.set((c.x_min+c.x_max)/2, c.slab_y+0.005, (c.z_min+c.z_max)/2);
   compGroup.add(mesh);
+  // ラベル
+  const hex='#'+color.toString(16).padStart(6,'0');
+  const lDiv=document.createElement('div');lDiv.className='comp-label';
+  lDiv.style.background='rgba(0,0,0,0.6)';lDiv.style.borderLeft='3px solid '+hex;
+  lDiv.innerHTML=c.category+'<br>'+w.toFixed(2)+'×'+Math.abs(d).toFixed(2)+'m';
+  const lObj=new THREE.CSS2DObject(lDiv);
+  lObj.position.set((c.x_min+c.x_max)/2, c.slab_y+0.05, (c.z_min+c.z_max)/2);
+  compGroup.add(lObj);
 }});
 
 // 2F区画表示（区画ごとに色分け）
@@ -1596,6 +1625,14 @@ F2_COMPARTMENTS.forEach((c,i)=>{{
   mesh.rotation.x=-Math.PI/2;
   mesh.position.set((c.x_min+c.x_max)/2, c.slab_y+0.005, (c.z_min+c.z_max)/2);
   compGroup.add(mesh);
+  // ラベル
+  const hex='#'+color.toString(16).padStart(6,'0');
+  const lDiv=document.createElement('div');lDiv.className='comp-label';
+  lDiv.style.background='rgba(0,0,0,0.6)';lDiv.style.borderLeft='3px solid '+hex;
+  lDiv.innerHTML='2F-区画'+(i+1)+'<br>'+w.toFixed(2)+'×'+Math.abs(d).toFixed(2)+'m';
+  const lObj=new THREE.CSS2DObject(lDiv);
+  lObj.position.set((c.x_min+c.x_max)/2, c.slab_y+0.05, (c.z_min+c.z_max)/2);
+  compGroup.add(lObj);
 }});
 
 // 2F開口表示（赤い半透明）
@@ -1607,6 +1644,13 @@ F2_OPENINGS.forEach((o,i)=>{{
   mesh.rotation.x=-Math.PI/2;
   mesh.position.set((o.x_min+o.x_max)/2, o.slab_y+0.01, (o.z_min+o.z_max)/2);
   compGroup.add(mesh);
+  // ラベル
+  const lDiv=document.createElement('div');lDiv.className='comp-label';
+  lDiv.style.background='rgba(255,23,68,0.6)';lDiv.style.borderLeft='3px solid #ff1744';
+  lDiv.innerHTML='開口'+(i+1)+'<br>'+w.toFixed(2)+'×'+Math.abs(d).toFixed(2)+'m';
+  const lObj=new THREE.CSS2DObject(lDiv);
+  lObj.position.set((o.x_min+o.x_max)/2, o.slab_y+0.06, (o.z_min+o.z_max)/2);
+  compGroup.add(lObj);
 }});
 
 // 1F根太ライン描画
@@ -1785,8 +1829,8 @@ function toggleComp(){{showC=!showC;compGroup.visible=showC;document.getElementB
 function toggleBuilding(){{showB=!showB;buildingGroup.visible=showB;document.getElementById('btn-building').classList.toggle('active',showB);}}
 
 const grid=new THREE.GridHelper(20,40,0x444444,0x333333);grid.position.copy(center);grid.position.y=0;scene.add(grid);
-(function anim(){{requestAnimationFrame(anim);renderer.render(scene,camera);}})();
-addEventListener('resize',()=>{{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);scene.traverse(c=>{{if(c.material&&c.material.resolution)c.material.resolution.set(innerWidth,innerHeight);}});}});
+(function anim(){{requestAnimationFrame(anim);renderer.render(scene,camera);labelRenderer.render(scene,camera);}})();
+addEventListener('resize',()=>{{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);labelRenderer.setSize(innerWidth,innerHeight);scene.traverse(c=>{{if(c.material&&c.material.resolution)c.material.resolution.set(innerWidth,innerHeight);}});}});
 </script>
 </body>
 </html>"""
