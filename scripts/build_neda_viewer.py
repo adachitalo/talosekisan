@@ -276,7 +276,177 @@ def detect_kiso_compartments(ifc, settings, rp):
 
 
 ###############################################################################
-# 根太配置
+# テラス・バルコニーの区画検出
+###############################################################################
+
+def detect_terrace_balcony_compartments(ifc, settings):
+    """IFCのテラス・バルコニースラブから区画を検出する。
+    各スラブのBBから矩形区画を生成し、短手方向（根太の走る方向）を判定する。
+
+    Returns: list of dicts with:
+      x_min, x_max, y_min, y_max (IFC座標),
+      slab_top_z (IFC Z座標 = スラブ上面),
+      joist_dir ("x" or "y"): 根太が走る方向（短手方向）,
+      category: "テラス" or "バルコニー"
+    """
+    slabs = ifc.by_type("IfcSlab")
+    compartments = []
+
+    for slab in slabs:
+        name = (slab.Name or "").lower()
+        if "terrace" in name:
+            category = "テラス"
+        elif "balcony" in name or "balconi" in name:
+            category = "バルコニー"
+        else:
+            continue
+
+        try:
+            shape = ifcopenshell.geom.create_shape(settings, slab)
+            vf = shape.geometry.verts
+            xs = [vf[i] for i in range(0, len(vf), 3)]
+            ys = [vf[i+1] for i in range(0, len(vf), 3)]
+            zs = [vf[i+2] for i in range(0, len(vf), 3)]
+
+            x_min, x_max = min(xs), max(xs)
+            y_min, y_max = min(ys), max(ys)
+            x_span = x_max - x_min
+            y_span = y_max - y_min
+
+            # スラブ上面 = IFC Z座標の最大値
+            slab_top_z = max(zs)
+
+            # 短手方向に根太を走らせる
+            # IFC X方向が短い → 根太はIFC X方向に走る → joist_dir="x"
+            # IFC Y方向が短い → 根太はIFC Y方向に走る → joist_dir="y"
+            if x_span <= y_span:
+                joist_dir = "x"
+            else:
+                joist_dir = "y"
+
+            compartments.append({
+                "x_min": x_min, "x_max": x_max,
+                "y_min": y_min, "y_max": y_max,
+                "width_x": x_span,
+                "width_y": y_span,
+                "slab_top_z": slab_top_z,
+                "joist_dir": joist_dir,
+                "category": category,
+                "name": slab.Name,
+            })
+        except Exception as e:
+            print(f"  WARNING: スラブ解析失敗 ({slab.Name}): {e}")
+
+    print(f"\n  テラス・バルコニー区画: {len(compartments)}個")
+    for idx, c in enumerate(compartments):
+        print(f"    {c['category']}{idx+1}: X=[{c['x_min']:.3f},{c['x_max']:.3f}] "
+              f"Y=[{c['y_min']:.3f},{c['y_max']:.3f}] "
+              f"({c['width_x']:.3f} x {c['width_y']:.3f}) "
+              f"根太方向={c['joist_dir']} 上面Z={c['slab_top_z']:.3f}")
+
+    return compartments
+
+
+###############################################################################
+# テラス・バルコニーの根太配置
+###############################################################################
+
+def place_joists_tb(compartments, pitch=0.455):
+    """テラス・バルコニー区画ごとに根太を配置。
+    根太はjoist_dir方向（短手方向）に走り、長手方向にpitch間隔で並ぶ。
+    """
+    joists = []
+
+    for comp_idx, comp in enumerate(compartments):
+        joist_dir = comp["joist_dir"]
+
+        if joist_dir == "x":
+            # 根太はIFC X方向に走る、IFC Y方向にピッチで並ぶ
+            joist_start = comp["x_min"]
+            joist_end = comp["x_max"]
+            pitch_start = comp["y_min"]
+            pitch_end = comp["y_max"]
+        else:
+            # 根太はIFC Y方向に走る、IFC X方向にピッチで並ぶ
+            joist_start = comp["y_min"]
+            joist_end = comp["y_max"]
+            pitch_start = comp["x_min"]
+            pitch_end = comp["x_max"]
+
+        joist_length = abs(joist_end - joist_start)
+
+        # 両端に必ず配置
+        positions = [
+            {"pos": pitch_start, "reason": "区画端部"},
+            {"pos": pitch_end, "reason": "区画端部"},
+        ]
+
+        # ピッチ間隔で配置
+        pos = pitch_start + pitch
+        while pos < pitch_end - 0.01:
+            positions.append({"pos": pos, "reason": "基本ピッチ"})
+            pos += pitch
+
+        # 重複マージ（30mm以内は区画端部を優先）
+        positions.sort(key=lambda p: p["pos"])
+        merged = []
+        for p in positions:
+            if merged and abs(p["pos"] - merged[-1]["pos"]) < 0.03:
+                if p["reason"] == "区画端部":
+                    merged[-1] = p
+                continue
+            merged.append(p)
+
+        for p in merged:
+            joists.append({
+                "comp_idx": comp_idx,
+                "pos": p["pos"],
+                "reason": p["reason"],
+                "joist_start": joist_start,
+                "joist_end": joist_end,
+                "length": joist_length,
+                "joist_dir": joist_dir,
+                "slab_top_z": comp["slab_top_z"],
+            })
+
+    return joists
+
+
+def generate_joist_lines_tb(joists):
+    """テラス・バルコニー根太の3Dラインセグメント(Three.js座標)を生成。
+    IFC→Three.js: (X, Y, Z) → (X, Z, -Y)
+    """
+    lines = []
+
+    for j in joists:
+        # スラブ上面のThree.js Y座標 = IFC Z
+        slab_y = j["slab_top_z"]
+
+        if j["joist_dir"] == "x":
+            # 根太はIFC X方向に走る
+            x1 = j["joist_start"]
+            x2 = j["joist_end"]
+            z = -j["pos"]  # IFC Y → Three.js -Z
+            seg = [[x1, slab_y, z], [x2, slab_y, z]]
+        else:
+            # 根太はIFC Y方向に走る
+            x = j["pos"]   # IFC X → Three.js X
+            z1 = -j["joist_start"]  # IFC Y → Three.js -Z
+            z2 = -j["joist_end"]
+            seg = [[x, slab_y, z1], [x, slab_y, z2]]
+
+        lines.append({
+            "seg": seg,
+            "length_m": round(j["length"], 3),
+            "reason": j["reason"],
+            "comp_idx": j["comp_idx"],
+        })
+
+    return lines
+
+
+###############################################################################
+# 根太配置（1F基礎区画）
 ###############################################################################
 
 def place_joists(compartments, rp, pitch=0.455):
@@ -464,18 +634,23 @@ def main():
         print("ERROR: 基礎区画が検出できませんでした")
         sys.exit(1)
 
-    # === Part 4-5: ピッチ別に根太配置＆ライン生成 ===
+    # === Part 4: テラス・バルコニー区画検出 ===
+    print("\nテラス・バルコニー区画検出中...")
+    tb_compartments = detect_terrace_balcony_compartments(ifc, settings)
+
+    # === Part 5-6: ピッチ別に根太配置＆ライン生成（1F + テラス・バルコニー） ===
     all_pitch_data = {}
+    all_tb_pitch_data = {}
     first_pitch = True
 
     for pitch in JOIST_PITCHES:
         pitch_mm = int(pitch * 1000)
-        print(f"\n根太配置計算中... (ピッチ: {pitch_mm}mm)")
-        joists = place_joists(compartments, rp, pitch=pitch)
-        print(f"  配置位置: {len(joists)}箇所")
 
+        # --- 1F根太 ---
+        print(f"\n1F根太配置計算中... (ピッチ: {pitch_mm}mm)")
+        joists = place_joists(compartments, rp, pitch=pitch)
         joist_lines = generate_joist_lines(joists, rp)
-        print(f"  根太ライン: {len(joist_lines)}本")
+        print(f"  1F根太ライン: {len(joist_lines)}本")
 
         total_count = len(joist_lines)
         total_length = sum(j["length_m"] for j in joist_lines)
@@ -489,19 +664,6 @@ def main():
             length_by_reason[j["reason"]] += j["length_m"]
             count_by_comp[j["comp_idx"]] += 1
             length_by_comp[j["comp_idx"]] += j["length_m"]
-
-        if first_pitch:
-            print(f"\n=== 根太積算 ({pitch_mm}mm) ===")
-            print(f"  総本数: {total_count}本")
-            print(f"  総長さ: {total_length:.2f}m")
-            print(f"\n  理由別:")
-            for reason in sorted(count_by_reason.keys()):
-                print(f"    {reason}: {count_by_reason[reason]}本 / {length_by_reason[reason]:.2f}m")
-            print(f"\n  区画別:")
-            for ci in sorted(count_by_comp.keys()):
-                c = compartments[ci]
-                print(f"    区画{ci+1} ({c['width_x']:.2f}x{c['width_y']:.2f}m): "
-                      f"{count_by_comp[ci]}本 / {length_by_comp[ci]:.2f}m")
 
         summary_info = {
             "total_count": total_count,
@@ -519,6 +681,59 @@ def main():
             "joist_lines": joist_lines,
             "summary": summary_info,
         }
+
+        # --- テラス・バルコニー根太 ---
+        if tb_compartments:
+            print(f"  テラス・バルコニー根太配置計算中... (ピッチ: {pitch_mm}mm)")
+            tb_joists = place_joists_tb(tb_compartments, pitch=pitch)
+            tb_joist_lines = generate_joist_lines_tb(tb_joists)
+            print(f"  テラス・バルコニー根太ライン: {len(tb_joist_lines)}本")
+
+            tb_total_count = len(tb_joist_lines)
+            tb_total_length = sum(j["length_m"] for j in tb_joist_lines)
+
+            tb_count_by_comp = defaultdict(int)
+            tb_length_by_comp = defaultdict(float)
+            for j in tb_joist_lines:
+                tb_count_by_comp[j["comp_idx"]] += 1
+                tb_length_by_comp[j["comp_idx"]] += j["length_m"]
+
+            tb_summary = {
+                "total_count": tb_total_count,
+                "total_length": round(tb_total_length, 2),
+                "count_by_comp": {str(k): v for k, v in tb_count_by_comp.items()},
+                "length_by_comp": {str(k): round(v, 2) for k, v in tb_length_by_comp.items()},
+                "pitch": pitch_mm,
+                "compartment_count": len(tb_compartments),
+            }
+
+            all_tb_pitch_data[pitch_mm] = {
+                "joist_lines": tb_joist_lines,
+                "summary": tb_summary,
+            }
+
+        if first_pitch:
+            print(f"\n=== 1F根太積算 ({pitch_mm}mm) ===")
+            print(f"  総本数: {total_count}本")
+            print(f"  総長さ: {total_length:.2f}m")
+            print(f"\n  理由別:")
+            for reason in sorted(count_by_reason.keys()):
+                print(f"    {reason}: {count_by_reason[reason]}本 / {length_by_reason[reason]:.2f}m")
+            print(f"\n  区画別:")
+            for ci in sorted(count_by_comp.keys()):
+                c = compartments[ci]
+                print(f"    区画{ci+1} ({c['width_x']:.2f}x{c['width_y']:.2f}m): "
+                      f"{count_by_comp[ci]}本 / {length_by_comp[ci]:.2f}m")
+            if tb_compartments:
+                print(f"\n=== テラス・バルコニー根太積算 ({pitch_mm}mm) ===")
+                print(f"  総本数: {tb_total_count}本")
+                print(f"  総長さ: {tb_total_length:.2f}m")
+                for ci, c in enumerate(tb_compartments):
+                    cnt = tb_count_by_comp.get(ci, 0)
+                    ln = tb_length_by_comp.get(ci, 0)
+                    print(f"    {c['category']} ({c['width_x']:.2f}x{c['width_y']:.2f}m): "
+                          f"{cnt}本 / {ln:.2f}m")
+
         first_pitch = False
 
     # === HTML出力 ===
@@ -526,16 +741,27 @@ def main():
     meshes_json = json.dumps(meshes, ensure_ascii=False)
     colors_json = json.dumps(CATEGORY_COLORS, ensure_ascii=False)
 
-    # 区画情報をJSON化（Three.js座標系）
+    # 1F区画情報をJSON化（Three.js座標系）
     comp_data = []
     for c in compartments:
-        # IFC座標 → Three.js座標: (X, Y, Z) → (X, Z, -Y)
         comp_data.append({
             "x_min": c["x_min"], "x_max": c["x_max"],
-            "z_min": -c["y_max"], "z_max": -c["y_min"],  # IFC Y → Three.js -Z
+            "z_min": -c["y_max"], "z_max": -c["y_min"],
             "width_x": c["width_x"], "width_y": c["width_y"],
         })
     compartments_json = json.dumps(comp_data, ensure_ascii=False)
+
+    # テラス・バルコニー区画情報をJSON化（Three.js座標系）
+    tb_comp_data = []
+    for c in tb_compartments:
+        tb_comp_data.append({
+            "x_min": c["x_min"], "x_max": c["x_max"],
+            "z_min": -c["y_max"], "z_max": -c["y_min"],
+            "width_x": c["width_x"], "width_y": c["width_y"],
+            "slab_y": c["slab_top_z"],  # Three.js Y = IFC Z
+            "category": c["category"],
+        })
+    tb_compartments_json = json.dumps(tb_comp_data, ensure_ascii=False)
 
     pitch_data_for_html = {}
     for pitch_mm, pdata in all_pitch_data.items():
@@ -544,10 +770,18 @@ def main():
             "summary": pdata["summary"],
         }
     pitch_data_json = json.dumps(pitch_data_for_html, ensure_ascii=False)
+
+    tb_pitch_data_json = json.dumps(
+        {pm: {"joists": d["joist_lines"], "summary": d["summary"]}
+         for pm, d in all_tb_pitch_data.items()},
+        ensure_ascii=False
+    ) if all_tb_pitch_data else "{}"
+
     pitches_json = json.dumps([int(p * 1000) for p in JOIST_PITCHES])
 
     html = generate_html(meshes_json, pitch_data_json, pitches_json,
-                         default_pitch, colors_json, compartments_json, model_name)
+                         default_pitch, colors_json, compartments_json,
+                         tb_compartments_json, tb_pitch_data_json, model_name)
 
     os.makedirs(os.path.dirname(OUTPUT_HTML) or ".", exist_ok=True)
     with open(OUTPUT_HTML, 'w', encoding='utf-8') as f:
@@ -567,6 +801,11 @@ def main():
         "length_by_reason": dp["summary"]["length_by_reason"],
         "compartment_count": len(compartments),
     }
+    if default_pitch in all_tb_pitch_data:
+        tb_dp = all_tb_pitch_data[default_pitch]
+        summary_out["tb_total_count"] = tb_dp["summary"]["total_count"]
+        summary_out["tb_total_length_m"] = tb_dp["summary"]["total_length"]
+        summary_out["tb_compartment_count"] = len(tb_compartments)
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(summary_out, f, ensure_ascii=False, indent=2)
     print(f"JSON集計: {json_path}")
@@ -577,7 +816,8 @@ def main():
 ###############################################################################
 
 def generate_html(meshes_json, pitch_data_json, pitches_json,
-                  default_pitch, colors_json, compartments_json, model_name=""):
+                  default_pitch, colors_json, compartments_json,
+                  tb_compartments_json="{}", tb_pitch_data_json="{}", model_name=""):
     return f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -616,7 +856,8 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 <div id="legend"></div>
 <div id="controls">
   <div id="pitch-group"></div>
-  <button id="btn-neda" class="active" onclick="toggleNeda()">根太表示</button>
+  <button id="btn-neda" class="active" onclick="toggleNeda()">1F根太</button>
+  <button id="btn-tb" class="active" onclick="toggleTB()">テラス・バルコニー根太</button>
   <button id="btn-comp" class="active" onclick="toggleComp()">区画表示</button>
   <button id="btn-building" class="active" onclick="toggleBuilding()">建物表示</button>
   <button onclick="resetCam()">リセット</button>
@@ -631,6 +872,8 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
 <script>
 const MESHES={meshes_json};
 const PITCH_DATA={pitch_data_json};
+const TB_PITCH_DATA={tb_pitch_data_json};
+const TB_COMPARTMENTS={tb_compartments_json};
 const PITCHES={pitches_json};
 const DEFAULT_PITCH={default_pitch};
 const COLORS={colors_json};
@@ -712,9 +955,26 @@ COMPARTMENTS.forEach((c,i)=>{{
   // 区画枠線（太線は不要なので削除済み — 半透明面のみ表示）
 }});
 
-// 根太ライン描画
+// テラス・バルコニー区画表示
+const TB_COLORS = {{ "テラス": 0x66bb6a, "バルコニー": 0x42a5f5 }};
+TB_COMPARTMENTS.forEach((c,i)=>{{
+  const w=c.x_max-c.x_min, d=c.z_max-c.z_min;
+  const g=new THREE.PlaneGeometry(w,Math.abs(d));
+  const color=TB_COLORS[c.category]||0x888888;
+  const mat=new THREE.MeshBasicMaterial({{color,transparent:true,opacity:0.15,side:THREE.DoubleSide}});
+  const mesh=new THREE.Mesh(g,mat);
+  mesh.rotation.x=-Math.PI/2;
+  mesh.position.set((c.x_min+c.x_max)/2, c.slab_y+0.005, (c.z_min+c.z_max)/2);
+  compGroup.add(mesh);
+}});
+
+// 1F根太ライン描画
 const nedaGroup=new THREE.Group();
 scene.add(nedaGroup);
+
+// テラス・バルコニー根太ライン描画
+const tbNedaGroup=new THREE.Group();
+scene.add(tbNedaGroup);
 
 function buildNedaLines(pitchMm){{
   while(nedaGroup.children.length>0) nedaGroup.remove(nedaGroup.children[0]);
@@ -753,12 +1013,46 @@ function buildNedaLines(pitchMm){{
     const c=COMPARTMENTS[i];
     h+=`<span style="color:${{hex}}">■</span> 区画${{i+1}} (${{c.width_x.toFixed(2)}}x${{c.width_y.toFixed(2)}}m): ${{cnt}}本 / ${{len}}m<br>`;
   }}
+  // テラス・バルコニー根太の集計
+  const tbPd=TB_PITCH_DATA[pitchMm];
+  if(tbPd && tbPd.summary.total_count>0){{
+    h+='<br><b style="font-size:14px;">テラス・バルコニー根太</b><br><br>';
+    h+=`ピッチ: ${{tbPd.summary.pitch}}mm<br>`;
+    h+=`<b>総本数: ${{tbPd.summary.total_count}}本</b><br>`;
+    h+=`総長さ: ${{tbPd.summary.total_length}}m<br><br>`;
+    for(let i=0;i<tbPd.summary.compartment_count;i++){{
+      const cnt=tbPd.summary.count_by_comp[String(i)]||0;
+      const len=tbPd.summary.length_by_comp[String(i)]||0;
+      const c=TB_COMPARTMENTS[i];
+      const color=TB_COLORS[c.category]||0x888888;
+      const hex='#'+color.toString(16).padStart(6,'0');
+      h+=`<span style="color:${{hex}}">■</span> ${{c.category}} (${{c.width_x.toFixed(2)}}x${{c.width_y.toFixed(2)}}m): ${{cnt}}本 / ${{len}}m<br>`;
+    }}
+  }}
   document.getElementById('neda-info').innerHTML=h;
+}}
+
+function buildTBNedaLines(pitchMm){{
+  while(tbNedaGroup.children.length>0) tbNedaGroup.remove(tbNedaGroup.children[0]);
+  const pd=TB_PITCH_DATA[pitchMm];
+  if(!pd) return;
+  pd.joists.forEach(j=>{{
+    const c=TB_COMPARTMENTS[j.comp_idx];
+    const color=TB_COLORS[c.category]||0x888888;
+    const s=j.seg;
+    const g=new THREE.LineGeometry();
+    g.setPositions([s[0][0],s[0][1],s[0][2],s[1][0],s[1][1],s[1][2]]);
+    const mat=new THREE.LineMaterial({{color,linewidth:4,resolution:new THREE.Vector2(innerWidth,innerHeight)}});
+    const line=new THREE.Line2(g,mat);
+    line.userData={{reason:j.reason,length:j.length_m,comp_idx:j.comp_idx}};
+    tbNedaGroup.add(line);
+  }});
 }}
 
 function switchPitch(pitchMm){{
   currentPitch=pitchMm;
   buildNedaLines(pitchMm);
+  buildTBNedaLines(pitchMm);
   document.querySelectorAll('#pitch-group button').forEach(b=>{{
     b.classList.toggle('active', parseInt(b.dataset.pitch)===pitchMm);
   }});
@@ -775,6 +1069,7 @@ PITCHES.forEach(p=>{{
 }});
 
 buildNedaLines(DEFAULT_PITCH);
+buildTBNedaLines(DEFAULT_PITCH);
 
 const center=new THREE.Vector3();bbox.getCenter(center);
 const size=bbox.getSize(new THREE.Vector3());const maxDim=Math.max(size.x,size.y,size.z);
@@ -802,8 +1097,9 @@ if(hits.length>0){{selMesh=hits[0].object;selMesh.material.emissive.setHex(0x333
 document.getElementById('sel-info').textContent=selMesh.userData.cat+' / '+selMesh.userData.name;}}
 else{{document.getElementById('sel-info').textContent='クリックで部材選択';}}}});
 
-let showN=true,showC=true,showB=true;
+let showN=true,showTB=true,showC=true,showB=true;
 function toggleNeda(){{showN=!showN;nedaGroup.visible=showN;document.getElementById('btn-neda').classList.toggle('active',showN);}}
+function toggleTB(){{showTB=!showTB;tbNedaGroup.visible=showTB;document.getElementById('btn-tb').classList.toggle('active',showTB);}}
 function toggleComp(){{showC=!showC;compGroup.visible=showC;document.getElementById('btn-comp').classList.toggle('active',showC);}}
 function toggleBuilding(){{showB=!showB;buildingGroup.visible=showB;document.getElementById('btn-building').classList.toggle('active',showB);}}
 
