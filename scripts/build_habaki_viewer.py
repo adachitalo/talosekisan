@@ -549,44 +549,58 @@ def main():
                     if inf["floor_y"] < FLOOR_LEVELS["1F"]["threshold"]]
     walls_1f = [(c, g, n, inf) for c, g, n, inf, vf, ff in walls_1f_raw]
 
+    # === 2Fスラブの存在チェック（平屋判定） ===
+    # 2Fスラブ（2-yuka）が存在しない場合は平屋とみなし、2F巾木処理をスキップ
+    has_2f_slab = any(
+        (slab.Name or "") == "2-yuka"
+        for slab in ifc.by_type("IfcSlab")
+    )
+
     # 2F巾木対象: ログ壁で、2F床を跨ぐ壁（bottom < 2.907 かつ top > 2.907）
     # 間仕切壁は2Fには存在しない（IFCデータ上）
+    # ※ 2Fスラブが存在しない場合（平屋など）はスキップ
     slab_2f = FLOOR_LEVELS["2F"]["slab_top"]
     walls_2f_raw = []  # (cat, gid, ename, info, vf_raw, ff_raw) — 断面計算用にメッシュも保持
-    seen_2f = set()
-    for wall in ifc.by_type("IfcWall"):
-        gid = wall.GlobalId
-        if gid in seen_2f:
-            continue
-        seen_2f.add(gid)
-        ename = wall.Name or ""
-        if any(ename.startswith(p) for p in SKIP):
-            continue
-        cat = None
-        for k, v in WALL_SUB.items():
-            if ename.startswith(k):
-                cat = v
-                break
-        if cat != "ログ壁":
-            continue
-        try:
-            shape = ifcopenshell.geom.create_shape(settings, wall)
-            vf = shape.geometry.verts
-            ff = shape.geometry.faces
-            verts_3js = []
-            for i in range(0, len(vf), 3):
-                verts_3js.extend([vf[i], vf[i + 2], -vf[i + 1]])
-            info = extract_wall_edges(verts_3js)
-            if info and info["floor_y"] < slab_2f and info["top_y"] > slab_2f + 0.1:
-                walls_2f_raw.append((cat, gid, ename, info, list(vf), list(ff)))
-        except Exception:
-            pass
+    walls_2f = []
 
-    # 互換性のために walls_2f も保持（classify_exterior_with_side用）
-    walls_2f = [(c, g, n, inf) for c, g, n, inf, vf, ff in walls_2f_raw]
+    if has_2f_slab:
+        seen_2f = set()
+        for wall in ifc.by_type("IfcWall"):
+            gid = wall.GlobalId
+            if gid in seen_2f:
+                continue
+            seen_2f.add(gid)
+            ename = wall.Name or ""
+            if any(ename.startswith(p) for p in SKIP):
+                continue
+            cat = None
+            for k, v in WALL_SUB.items():
+                if ename.startswith(k):
+                    cat = v
+                    break
+            if cat != "ログ壁":
+                continue
+            try:
+                shape = ifcopenshell.geom.create_shape(settings, wall)
+                vf = shape.geometry.verts
+                ff = shape.geometry.faces
+                verts_3js = []
+                for i in range(0, len(vf), 3):
+                    verts_3js.extend([vf[i], vf[i + 2], -vf[i + 1]])
+                info = extract_wall_edges(verts_3js)
+                if info and info["floor_y"] < slab_2f and info["top_y"] > slab_2f + 0.1:
+                    walls_2f_raw.append((cat, gid, ename, info, list(vf), list(ff)))
+            except Exception:
+                pass
+
+        # 互換性のために walls_2f も保持（classify_exterior_with_side用）
+        walls_2f = [(c, g, n, inf) for c, g, n, inf, vf, ff in walls_2f_raw]
 
     print(f"  1F巾木対象壁: {len(walls_1f)}本")
-    print(f"  2F巾木対象壁: {len(walls_2f)}本（2F床 Y={slab_2f}m を跨ぐログ壁）")
+    if has_2f_slab:
+        print(f"  2F巾木対象壁: {len(walls_2f)}本（2F床 Y={slab_2f}m を跨ぐログ壁）")
+    else:
+        print(f"  平屋（2Fスラブなし）→ 2F巾木処理をスキップ")
 
     # === スラブ上面メッシュ取得（巾木クリッピング用） ===
     print("  スラブ上面メッシュを取得中...")
@@ -729,73 +743,77 @@ def main():
               f"断面{n_faces}面 → {wall_seg_total:.2f}m")
 
     # --- 2F: 壁メッシュ断面ベース + スラブクリッピング ---
-    ext_map_2f = classify_exterior_with_side(walls_2f)
-    slab_y_2f = FLOOR_LEVELS["2F"]["slab_top"]
-    slab_tris_2f = slab_tris_by_floor.get("2F", [])
+    # 平屋（2Fスラブなし）の場合はスキップ
+    if has_2f_slab:
+        ext_map_2f = classify_exterior_with_side(walls_2f)
+        slab_y_2f = FLOOR_LEVELS["2F"]["slab_top"]
+        slab_tris_2f = slab_tris_by_floor.get("2F", [])
 
-    print(f"\n  2F (巾木高さ Y={slab_y_2f:.3f}m): {len(walls_2f)}壁 [断面ベース]")
+        print(f"\n  2F (巾木高さ Y={slab_y_2f:.3f}m): {len(walls_2f)}壁 [断面ベース]")
 
-    for cat, gid, ename, info, vf_raw, ff_raw in walls_2f_raw:
-        ext_info = ext_map_2f.get(gid, {"is_ext": False, "ext_side": None})
-        is_ext = ext_info["is_ext"]
-        ext_side = ext_info["ext_side"]
-        direction = info["direction"]
+        for cat, gid, ename, info, vf_raw, ff_raw in walls_2f_raw:
+            ext_info = ext_map_2f.get(gid, {"is_ext": False, "ext_side": None})
+            is_ext = ext_info["is_ext"]
+            ext_side = ext_info["ext_side"]
+            direction = info["direction"]
 
-        # 壁メッシュの2F断面から巾木セグメントを抽出
-        face_segs = extract_baseboard_from_cross_section(vf_raw, ff_raw, slab_y_2f, direction)
+            # 壁メッシュの2F断面から巾木セグメントを抽出
+            face_segs = extract_baseboard_from_cross_section(vf_raw, ff_raw, slab_y_2f, direction)
 
-        if not face_segs:
-            print(f"    {cat:8s} {ename:15s} → 2Fに断面なし")
-            continue
+            if not face_segs:
+                print(f"    {cat:8s} {ename:15s} → 2Fに断面なし")
+                continue
 
-        # 面座標を並べ替え
-        face_coords_sorted = sorted(face_segs.keys())
+            # 面座標を並べ替え
+            face_coords_sorted = sorted(face_segs.keys())
 
-        # 面の選択（exterior→室内側のみ、interior→両面）
-        if len(face_coords_sorted) < 2:
-            faces_to_use_coords = face_coords_sorted
-        elif is_ext:
-            # 外周壁: 室内側のみ
-            if ext_side == "min":
-                faces_to_use_coords = [face_coords_sorted[-1]]  # max側 = 室内
+            # 面の選択（exterior→室内側のみ、interior→両面）
+            if len(face_coords_sorted) < 2:
+                faces_to_use_coords = face_coords_sorted
+            elif is_ext:
+                # 外周壁: 室内側のみ
+                if ext_side == "min":
+                    faces_to_use_coords = [face_coords_sorted[-1]]  # max側 = 室内
+                else:
+                    faces_to_use_coords = [face_coords_sorted[0]]   # min側 = 室内
             else:
-                faces_to_use_coords = [face_coords_sorted[0]]   # min側 = 室内
-        else:
-            faces_to_use_coords = face_coords_sorted  # 両面
+                faces_to_use_coords = face_coords_sorted  # 両面
 
-        wall_seg_total = 0
-        for fc in faces_to_use_coords:
-            for seg_3d in face_segs[fc]:
-                p1, p2 = seg_3d
+            wall_seg_total = 0
+            for fc in faces_to_use_coords:
+                for seg_3d in face_segs[fc]:
+                    p1, p2 = seg_3d
 
-                # スラブ範囲でクリッピング
-                clipped = clip_segment_to_slab(p1, p2, slab_tris_2f, direction)
+                    # スラブ範囲でクリッピング
+                    clipped = clip_segment_to_slab(p1, p2, slab_tris_2f, direction)
 
-                for sp1, sp2 in clipped:
-                    seg_len = np.sqrt(sum((a - b) ** 2 for a, b in zip(sp1, sp2)))
-                    if seg_len < 0.05:
-                        continue
-                    wall_seg_total += seg_len
-                    habaki_lines.append({
-                        "floor": "2F",
-                        "type": "exterior" if is_ext else "interior",
-                        "cat": cat,
-                        "seg": [
-                            [round(sp1[0], 4), round(sp1[1] + 0.02, 4), round(sp1[2], 4)],
-                            [round(sp2[0], 4), round(sp2[1] + 0.02, 4), round(sp2[2], 4)],
-                        ],
-                        "length_m": round(seg_len, 4),
-                    })
+                    for sp1, sp2 in clipped:
+                        seg_len = np.sqrt(sum((a - b) ** 2 for a, b in zip(sp1, sp2)))
+                        if seg_len < 0.05:
+                            continue
+                        wall_seg_total += seg_len
+                        habaki_lines.append({
+                            "floor": "2F",
+                            "type": "exterior" if is_ext else "interior",
+                            "cat": cat,
+                            "seg": [
+                                [round(sp1[0], 4), round(sp1[1] + 0.02, 4), round(sp1[2], 4)],
+                                [round(sp2[0], 4), round(sp2[1] + 0.02, 4), round(sp2[2], 4)],
+                            ],
+                            "length_m": round(seg_len, 4),
+                        })
 
-        if is_ext:
-            total_by_floor["2F"]["ext"] += wall_seg_total
-        else:
-            total_by_floor["2F"]["int"] += wall_seg_total
+            if is_ext:
+                total_by_floor["2F"]["ext"] += wall_seg_total
+            else:
+                total_by_floor["2F"]["int"] += wall_seg_total
 
-        pos_label = "外周" if is_ext else "室内"
-        n_faces = len(faces_to_use_coords)
-        print(f"    {pos_label} {cat:8s} {ename:15s} "
-              f"断面{n_faces}面 → {wall_seg_total:.2f}m")
+            pos_label = "外周" if is_ext else "室内"
+            n_faces = len(faces_to_use_coords)
+            print(f"    {pos_label} {cat:8s} {ename:15s} "
+                  f"断面{n_faces}面 → {wall_seg_total:.2f}m")
+    else:
+        print(f"\n  2F: スキップ（平屋のため2Fスラブなし）")
 
     # 集計表示
     grand_total = 0
