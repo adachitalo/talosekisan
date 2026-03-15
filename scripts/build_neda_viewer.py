@@ -754,7 +754,7 @@ def place_joists_2f(compartments, joist_dir, openings=None, pitch=0.455):
             # クリップ後のセグメントを根太として追加
             for seg_start, seg_end in clipped_segments:
                 seg_len = abs(seg_end - seg_start)
-                if seg_len < 0.05:  # 5cm未満はスキップ
+                if seg_len < 0.30:  # 30cm未満はスキップ（開口端と梁の隙間等）
                     continue
                 joists.append({
                     "comp_idx": comp_idx,
