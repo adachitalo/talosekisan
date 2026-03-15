@@ -1606,7 +1606,8 @@ body {{ background:#1a1a2e; overflow:hidden; font-family:Arial,sans-serif; }}
     <button id="btn-tb" class="active" onclick="toggleTB()">テラス・バルコニー根太</button>
     <button id="btn-f2" class="active" onclick="toggleF2()">2F根太</button>
     <button id="btn-comp" class="active" onclick="toggleComp()">区画表示</button>
-    <button id="btn-building" class="active" onclick="toggleBuilding()">建物表示</button>
+    <button id="btn-building" class="active" onclick="toggleBuilding()">建物透過</button>
+    <button id="btn-edges" class="active" onclick="toggleEdges()">輪郭</button>
     <button onclick="resetCam()">リセット</button>
   </div>
 </div>
@@ -1682,6 +1683,7 @@ _zm(f){{const o=this.c.position.clone().sub(this.t);o.multiplyScalar(f);this.c.p
 }}
 
 const buildingGroup=new THREE.Group();
+const edgesGroup=new THREE.Group();
 const catGroups={{}};const allMeshes=[];const bbox=new THREE.Box3();
 MESHES.forEach(m=>{{
 const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(m.verts,3));
@@ -1691,8 +1693,14 @@ const mat=new THREE.MeshLambertMaterial({{color:new THREE.Color(color),transpare
 const mesh=new THREE.Mesh(g,mat);mesh.userData={{cat:m.cat,name:m.name,gid:m.gid}};
 if(!catGroups[m.cat]){{catGroups[m.cat]=new THREE.Group();buildingGroup.add(catGroups[m.cat]);}}
 catGroups[m.cat].add(mesh);allMeshes.push(mesh);bbox.expandByObject(mesh);
+// 輪郭線
+const eg=new THREE.EdgesGeometry(g,20);
+const em=new THREE.LineBasicMaterial({{color:new THREE.Color(color),transparent:true,opacity:0.5}});
+const el=new THREE.LineSegments(eg,em);
+edgesGroup.add(el);
 }});
 scene.add(buildingGroup);
+scene.add(edgesGroup);
 
 // 区画表示
 const compGroup=new THREE.Group();
@@ -1953,12 +1961,13 @@ if(hits.length>0){{selMesh=hits[0].object;selMesh.material.emissive.setHex(0x333
 document.getElementById('sel-info').textContent=selMesh.userData.cat+' / '+selMesh.userData.name;}}
 else{{document.getElementById('sel-info').textContent='クリックで部材選択';}}}});
 
-let showN=true,showTB=true,showF2=true,showC=true,showB=true;
+let showN=true,showTB=true,showF2=true,showC=true,showB=true,showE=true;
 function toggleNeda(){{showN=!showN;nedaGroup.visible=showN;document.getElementById('btn-neda').classList.toggle('active',showN);}}
 function toggleTB(){{showTB=!showTB;tbNedaGroup.visible=showTB;document.getElementById('btn-tb').classList.toggle('active',showTB);}}
 function toggleF2(){{showF2=!showF2;f2NedaGroup.visible=showF2;document.getElementById('btn-f2').classList.toggle('active',showF2);}}
 function toggleComp(){{showC=!showC;compGroup.visible=showC;document.getElementById('btn-comp').classList.toggle('active',showC);}}
 function toggleBuilding(){{showB=!showB;buildingGroup.visible=showB;document.getElementById('btn-building').classList.toggle('active',showB);}}
+function toggleEdges(){{showE=!showE;edgesGroup.visible=showE;document.getElementById('btn-edges').classList.toggle('active',showE);}}
 
 const grid=new THREE.GridHelper(20,40,0x444444,0x333333);grid.position.copy(center);grid.position.y=0;scene.add(grid);
 (function anim(){{requestAnimationFrame(anim);renderer.render(scene,camera);labelRenderer.render(scene,camera);}})();
